@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#0e1116">
+<title>Обзор бота — график сделок</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#151b23; --panel2:#1b232d; --line:#26303c;
+    --text:#e7edf4; --dim:#8b99ab; --faint:#5a6879;
+    --up:#2ebd94; --down:#ef5f6b; --buy:#9575cd; --sell:#e0a458;
+    --accent:#37c7b4; --chan:#6f9fe0;
+    --font-ui:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",Roboto,sans-serif;
+    --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --r:12px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f5f8fc; --panel:#ffffff; --panel2:#eef3f9; --line:#d9e1ec;
+      --text:#0f1822; --dim:#566574; --faint:#95a3b3;
+      --up:#0f9d76; --down:#d6454f; --buy:#7e57c2; --sell:#bd7a26; --accent:#0f9d8c; --chan:#3f6fb0; }
+  }
+  :root[data-theme="dark"]{ --bg:#0e1116; --panel:#151b23; --panel2:#1b232d; --line:#26303c;
+    --text:#e7edf4; --dim:#8b99ab; --faint:#5a6879; --up:#2ebd94; --down:#ef5f6b;
+    --buy:#9575cd; --sell:#e0a458; --accent:#37c7b4; --chan:#6f9fe0; }
+  :root[data-theme="light"]{ --bg:#f5f8fc; --panel:#ffffff; --panel2:#eef3f9; --line:#d9e1ec;
+    --text:#0f1822; --dim:#566574; --faint:#95a3b3; --up:#0f9d76; --down:#d6454f;
+    --buy:#7e57c2; --sell:#bd7a26; --accent:#0f9d8c; --chan:#3f6fb0; }
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; }
+  body{ background:var(--bg); color:var(--text); font-family:var(--font-ui);
+    -webkit-font-smoothing:antialiased; overflow:hidden; }
+  .app{ display:flex; flex-direction:column; height:100dvh;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+
+  header{ display:flex; align-items:center; gap:10px; padding:12px 16px 8px; }
+  .brand{ display:flex; align-items:baseline; gap:8px; min-width:0; }
+  .brand b{ font-size:16px; font-weight:650; letter-spacing:-.01em; }
+  .brand .sub{ font-size:11px; color:var(--dim); white-space:nowrap; }
+  .dot{ width:7px; height:7px; border-radius:50%; background:var(--accent);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent); flex:none; }
+  header .spacer{ flex:1; }
+  .snap{ font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim);
+    border:1px solid var(--line); border-radius:999px; padding:4px 9px; }
+  .tbtn{ appearance:none; border:1px solid var(--line); background:var(--panel);
+    color:var(--dim); width:34px; height:30px; border-radius:9px; font-size:15px; cursor:pointer; }
+  .tbtn:active{ transform:scale(.94); }
+  .ibtn{ appearance:none; width:19px; height:19px; border-radius:50%; border:1px solid var(--line);
+    background:transparent; color:var(--dim); font:italic 700 11px/1 "Georgia",serif; cursor:pointer; flex:none; }
+  .ibtn:active{ transform:scale(.9); }
+  .ibtn[aria-expanded="true"]{ color:var(--accent); border-color:color-mix(in srgb,var(--accent) 55%,var(--line)); }
+  .botinfo{ position:absolute; top:calc(50px + env(safe-area-inset-top)); left:16px; right:16px;
+    max-width:380px; z-index:30; background:var(--panel); border:1px solid var(--line);
+    border-radius:13px; padding:12px 14px; box-shadow:0 12px 34px rgba(0,0,0,.42); }
+  .botinfo[hidden]{ display:none; }
+  .bi-title{ font-weight:650; font-size:14px; margin-bottom:5px; display:flex; align-items:center; gap:7px; }
+  .bi-tag{ font-size:9px; font-weight:700; padding:1px 6px; border-radius:5px;
+    background:color-mix(in srgb,var(--accent) 16%,transparent); color:var(--accent); }
+  .bi-desc{ font-size:13px; color:var(--dim); line-height:1.46; }
+
+  .pickers{ display:flex; flex-direction:column; gap:7px; padding:2px 0 8px; }
+  .row{ display:flex; align-items:center; gap:8px; padding:0 16px; }
+  .row[hidden]{ display:none; }
+  .row .lab{ font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint);
+    width:38px; flex:none; }
+  .chips{ display:flex; gap:7px; overflow-x:auto; scrollbar-width:none; padding:1px 2px 3px 0; scroll-snap-type:x proximity; }
+  .chips::-webkit-scrollbar{ display:none; }
+  .chip{ scroll-snap-align:start; white-space:nowrap; font-family:var(--font-ui); font-size:13px;
+    color:var(--dim); background:var(--panel); border:1px solid var(--line);
+    border-radius:999px; padding:7px 13px; cursor:pointer; transition:transform .08s, border-color .15s, color .15s;
+    display:flex; align-items:center; gap:7px; }
+  .chip:active{ transform:scale(.96); }
+  .chip .tag{ font-size:9px; font-weight:700; padding:1px 5px; border-radius:5px;
+    background:color-mix(in srgb,var(--accent) 16%,transparent); color:var(--accent); }
+  .chip[aria-selected="true"]{ color:var(--text); border-color:color-mix(in srgb,var(--accent) 55%,var(--line));
+    background:color-mix(in srgb,var(--accent) 12%,var(--panel)); }
+  .chip.pair[aria-selected="true"], .chip.tf[aria-selected="true"], .chip.mark[aria-selected="true"]{ font-weight:600; }
+
+  .chart-wrap{ position:relative; flex:1; min-height:0; margin:0 10px; }
+  canvas{ position:absolute; inset:0; width:100%; height:100%; touch-action:none; display:block; }
+  .readout{ position:absolute; top:8px; left:10px; right:10px; display:flex; gap:12px;
+    font-family:var(--font-mono); font-size:11px; color:var(--dim); pointer-events:none;
+    font-variant-numeric:tabular-nums; flex-wrap:wrap; }
+  .readout b{ color:var(--text); font-weight:600; }
+  .readout .up{ color:var(--up); } .readout .down{ color:var(--down); }
+
+  .stats{ display:flex; gap:8px; padding:9px 16px calc(10px + env(safe-area-inset-bottom));
+    overflow-x:auto; scrollbar-width:none; }
+  .stats::-webkit-scrollbar{ display:none; }
+  .stat{ flex:none; background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:8px 12px; min-width:78px; }
+  .stat .k{ font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--faint); }
+  .stat .v{ font-family:var(--font-mono); font-size:15px; font-weight:600; margin-top:2px;
+    font-variant-numeric:tabular-nums; }
+  .stat .v.buy{ color:var(--buy); } .stat .v.sell{ color:var(--sell); }
+  .stat .v.up{ color:var(--up); } .stat .v.down{ color:var(--down); }
+  .legend{ display:flex; gap:14px; align-items:center; padding:0 16px 6px; font-size:11px; color:var(--dim);
+    overflow-x:auto; scrollbar-width:none; white-space:nowrap; }
+  .legend::-webkit-scrollbar{ display:none; }
+  .legend span{ display:inline-flex; align-items:center; gap:5px; flex:none; }
+  .swatch{ width:9px; height:9px; border-radius:2px; }
+  .swatch.dash{ width:14px; height:0; border:0; border-top:2px dashed var(--sell); border-radius:0; }
+  .ring{ width:11px; height:11px; border-radius:50%; border:2px solid var(--buy); box-sizing:border-box; }
+  .tri-up{ width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:8px solid var(--buy); }
+  .tri-dn{ width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:8px solid var(--sell); }
+  .tip{ position:absolute; z-index:6; background:var(--panel); border:1px solid var(--line);
+    border-radius:11px; padding:9px 11px; font-size:12px; color:var(--text); pointer-events:none;
+    box-shadow:0 8px 26px rgba(0,0,0,.4); min-width:132px; line-height:1.4; }
+  .tip[hidden]{ display:none; }
+  .tip .side{ font-weight:700; font-size:12.5px; margin-bottom:4px; }
+  .tip .side.buy{ color:var(--buy); } .tip .side.sell{ color:var(--sell); }
+  .tip .r{ display:flex; justify-content:space-between; gap:16px; font-family:var(--font-mono);
+    font-variant-numeric:tabular-nums; color:var(--dim); }
+  .tip .r b{ color:var(--text); font-weight:600; }
+  .tip .r b.up{ color:var(--up); } .tip .r b.down{ color:var(--down); }
+  @media (prefers-reduced-motion: reduce){ .chip,.tbtn{ transition:none; } }
+  .gate{ position:fixed; inset:0; z-index:50; background:var(--bg); display:flex;
+    align-items:center; justify-content:center; padding:24px calc(24px + env(safe-area-inset-right)); }
+  .gate[hidden]{ display:none; }
+  .gate-card{ width:100%; max-width:320px; display:flex; flex-direction:column; gap:11px; text-align:center; }
+  .gate-title{ font-size:23px; font-weight:700; letter-spacing:-.02em; }
+  .gate-sub{ font-size:13px; color:var(--dim); margin-bottom:4px; }
+  .gate-input{ font-size:16px; padding:13px 15px; border-radius:12px; border:1px solid var(--line);
+    background:var(--panel); color:var(--text); font-family:var(--font-ui); outline:none; text-align:center; }
+  .gate-input:focus{ border-color:var(--accent); }
+  .gate-btn{ font-size:16px; font-weight:600; padding:13px; border-radius:12px; border:0;
+    background:var(--accent); color:#04211d; cursor:pointer; }
+  .gate-btn:active{ transform:scale(.98); }
+  .gate-err{ font-size:12px; color:var(--down); min-height:15px; }
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate" hidden>
+  <div class="gate-card">
+    <div class="gate-title">Обзор бота</div>
+    <div class="gate-sub">Введите пароль для доступа</div>
+    <input class="gate-input" id="gatepw" type="password" inputmode="text" autocomplete="off"
+           autocapitalize="off" spellcheck="false" placeholder="пароль">
+    <button class="gate-btn" id="gateok">Открыть</button>
+    <div class="gate-err" id="gateerr"></div>
+  </div>
+</div>
+
+<div class="app">
+  <header>
+    <span class="dot"></span>
+    <div class="brand">
+      <b>Обзор бота</b><span class="sub" id="botsub">свечи · сделки · канал</span>
+    </div>
+    <button class="ibtn" id="infobtn" aria-label="О боте">i</button>
+    <span class="spacer"></span>
+    <span class="snap" id="snaplabel">загрузка…</span>
+    <button class="tbtn" id="theme" aria-label="Тема">◐</button>
+  </header>
+
+  <div class="botinfo" id="botinfo" hidden></div>
+
+  <div class="pickers">
+    <div class="row"><div class="chips" id="tabs"></div><span class="lab" id="flab">Фильтр</span><div class="chips" id="botfilters"></div></div>
+    <div class="row" id="row-bot"><span class="lab">Бот</span><div class="chips" id="bots"></div></div>
+    <div class="row" id="row-strat" hidden><span class="lab">Стратегия</span><div class="chips" id="presets"></div></div>
+    <div class="row" id="row-pair"><span class="lab">Пара</span><div class="chips" id="pairs"></div></div>
+    <div class="row" id="row-tf"><span class="lab">ТФ</span><div class="chips" id="tfs"></div></div>
+    <div class="row" id="row-ind"><span class="lab">Индик.</span><div class="chips" id="inds"></div></div>
+  </div>
+
+  <div class="legend">
+    <span><i class="tri-up"></i>покупка</span>
+    <span><i class="tri-dn"></i>продажа</span>
+    <span><i class="ring"></i>начало цикла</span>
+    <span><i class="swatch dash"></i>ТП выставлен</span>
+    <span><i class="swatch" style="background:var(--faint)"></i>канал</span>
+    <span style="color:var(--faint)">тяни в любую сторону · щипок ↔ ширина ↕ высота · 2 тапа сброс</span>
+  </div>
+
+  <div class="chart-wrap">
+    <canvas id="cv"></canvas>
+    <div class="readout" id="readout"></div>
+    <div class="tip" id="tip" hidden></div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+</div>
+
+<script>
+let DATA = null;   // грузится из data.json (обновляется ботом раз в ~5 мин)
+const APP_VER = '2.84.1';   // версия страницы; при смене на сервере — авто-перезагрузка
+
+/* ---------- состояние ---------- */
+let S = { bot:null, pair:null, tf:null, tab:'hist', preset:null, filter:'all' };
+const TABS = [['hist','История'],['strat','Стратегия']];
+// фильтр списка ботов (просьба владельца: ботов много). cat приходит из export.py.
+const FILTERS = [['all','Все'],['real','Боевые'],['kepler','Кеплер'],['trader','Трейдеры'],['mine','Мои']];
+function visibleBots(){ return S.filter==='all' ? DATA.bots : DATA.bots.filter(b=>b.cat===S.filter); }
+const mstyle = 'linedot';   // стиль метки цены зафиксирован «−•−» (пикер убран)
+let showLev = localStorage.getItem('showlev')==='1';     // рисовать ли уровни S/R
+let cmbOn = localStorage.getItem('cmbon')==='1';         // панель Combined (RSI+StochRSI+MFI)
+let nqTgl = localStorage.getItem('nqtgl')==='1';         // панель nQQE тумблером (на любой паре/ТФ)
+let vpOn = localStorage.getItem('vpon')==='1';           // профиль объёма (Volume Profile)
+let chanOn = localStorage.getItem('chanon')!=='0';       // канал регрессии (по умолч. вкл)
+const LEVS = [['off','Выкл'],['on','Вкл']];
+// Индикаторы одной строкой: кнопка-переключатель (вкл/выкл по тапу). get/set каждого.
+const INDS = [
+  ['Уровни',   ()=>showLev, v=>{ showLev=v; localStorage.setItem('showlev', v?'1':'0'); }],
+  ['Combined', ()=>cmbOn,   v=>{ cmbOn=v;   localStorage.setItem('cmbon',  v?'1':'0'); }],
+  ['nQQE',     ()=>nqTgl,   v=>{ nqTgl=v;   localStorage.setItem('nqtgl',  v?'1':'0'); }],
+  ['Профиль',  ()=>vpOn,    v=>{ vpOn=v;    localStorage.setItem('vpon',   v?'1':'0'); }],
+  ['Канал',    ()=>chanOn,  v=>{ chanOn=v;  localStorage.setItem('chanon', v?'1':'0'); }],
+];
+const $ = s => document.querySelector(s);
+const fmtP = v => { const a=Math.abs(v); const d = a<1?6 : a<100?4 : 2; return v.toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d}); };
+const fmtDur = s => { const h=s/3600; if(h<1) return `${Math.round(s/60)} мин`; return h<48 ? `${h.toFixed(h<10?1:0)} ч` : `${(h/24).toFixed(1)} дн`; };
+function shade(hex, amt){ const n=parseInt(hex.replace('#',''),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  r=Math.round(r+(255-r)*amt); g=Math.round(g+(255-g)*amt); b=Math.round(b+(255-b)*amt); return `rgb(${r},${g},${b})`; }
+function lumOf(c){ let r,g,b; if(c[0]==='#'){ const n=parseInt(c.slice(1),16); r=(n>>16)&255; g=(n>>8)&255; b=n&255; }
+  else { const m=c.match(/\d+/g)||[0,0,0]; r=+m[0]; g=+m[1]; b=+m[2]; } return (0.299*r+0.587*g+0.114*b)/255; }
+const tfSec = {'1m':60,'3m':180,'5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,'4h':14400,'12h':43200,'1d':86400};
+
+/* ---------- css-переменные для канваса ---------- */
+function cssv(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+let COL = {}, MONO='monospace';
+function refreshColors(){
+  COL = { bg:cssv('--bg'), panel:cssv('--panel2'), line:cssv('--line'), text:cssv('--text'),
+    dim:cssv('--dim'), faint:cssv('--faint'), up:cssv('--up'), down:cssv('--down'),
+    buy:cssv('--buy'), sell:cssv('--sell'), accent:cssv('--accent'), chan:cssv('--chan') };
+  MONO = (cssv('--font-mono')||'monospace');
+}
+
+/* ---------- пикеры ---------- */
+function chip(txt, sel, tag){
+  const b=document.createElement('button'); b.className='chip'; b.setAttribute('role','tab');
+  b.setAttribute('aria-selected', sel?'true':'false');
+  if(tag){ const t=document.createElement('span'); t.className='tag'; t.textContent=tag; b.appendChild(t); }
+  b.appendChild(document.createTextNode(txt)); return b;
+}
+function applyTabRows(){                             // видимость рядов пикеров по вкладке
+  const strat=S.tab==='strat';
+  $('#row-bot').hidden=strat; $('#row-strat').hidden=!strat;
+  $('#flab').hidden=strat; $('#botfilters').hidden=strat;   // фильтр — только на «Истории» (там пикер «Бот»)
+  // ряд «Индик.» показываем в обеих вкладках (общие тумблеры индикаторов)
+}
+function buildPickers(){
+  const tc0=$('#tabs'); tc0.innerHTML='';
+  TABS.forEach(([id,nm])=>{ const c=chip(nm, id===S.tab); c.classList.add('tf');
+    c.onclick=()=>{ S.tab=id;
+      if(id==='strat'){ if(!S.preset&&DATA.presets&&DATA.presets[0]) S.preset=DATA.presets[0].id;
+        const pr=presetOf(S.preset); if(pr&&pr.tf&&DATA.tfs.includes(pr.tf)) S.tf=pr.tf; }  // дефолт — ТФ пресета
+      applyTabRows(); buildPickers(); sync(); }; tc0.appendChild(c); });
+  applyTabRows();
+  const prc=$('#presets'); if(prc){ prc.innerHTML='';
+    (DATA.presets||[]).forEach(pr=>{ const c=chip(pr.name, pr.id===S.preset); c.classList.add('bot');
+      c.onclick=()=>{ S.preset=pr.id; sync(); }; prc.appendChild(c); }); }
+  const fc=$('#botfilters'); fc.innerHTML='';
+  FILTERS.forEach(([id,nm])=>{ const c=chip(nm, id===S.filter); c.classList.add('tf');
+    c.onclick=()=>{ S.filter=id;
+      const vis=visibleBots();                       // текущий бот выпал из фильтра → берём первый видимый
+      if(vis.length && !vis.find(b=>b.id===S.bot)){ S.bot=vis[0].id; autoTf(); }
+      buildPickers(); sync(); }; fc.appendChild(c); });
+  const bc=$('#bots'); bc.innerHTML='';
+  visibleBots().forEach(b=>{ const c=chip(b.name.split(' · ')[0], b.id===S.bot, b.variant!=='main'?b.variant:null);
+    c.classList.add('bot'); c.onclick=()=>{ S.bot=b.id; autoTf(); sync(); }; bc.appendChild(c); });
+  const pc=$('#pairs'); pc.innerHTML='';
+  DATA.pairs.forEach(p=>{ const c=chip(p.replace('FDUSD',''), p===S.pair); c.classList.add('pair');
+    c.onclick=()=>{ S.pair=p; autoTf(); sync(); }; pc.appendChild(c); });
+  const tc=$('#tfs'); tc.innerHTML='';
+  DATA.tfs.forEach(t=>{ const c=chip(t, t===S.tf); c.classList.add('tf');
+    c.onclick=()=>{ S.tf=t; sync(); }; tc.appendChild(c); });
+  const idc=document.getElementById('inds'); idc.innerHTML='';
+  INDS.forEach(([nm,get,set])=>{ const c=chip(nm, get()); c.classList.add('mark');
+    c.onclick=()=>{ set(!get()); markSel(); draw(); }; idc.appendChild(c); });
+}
+function markSel(){
+  const vb=visibleBots();
+  document.querySelectorAll('#botfilters .chip').forEach((c,i)=>c.setAttribute('aria-selected', FILTERS[i][0]===S.filter));
+  document.querySelectorAll('#bots .chip').forEach((c,i)=>c.setAttribute('aria-selected', vb[i]&&vb[i].id===S.bot));
+  document.querySelectorAll('#pairs .chip').forEach((c,i)=>c.setAttribute('aria-selected', DATA.pairs[i]===S.pair));
+  document.querySelectorAll('#tfs .chip').forEach((c,i)=>c.setAttribute('aria-selected', DATA.tfs[i]===S.tf));
+  document.querySelectorAll('#inds .chip').forEach((c,i)=>c.setAttribute('aria-selected', INDS[i][1]()));
+  document.querySelectorAll('#tabs .chip').forEach((c,i)=>c.setAttribute('aria-selected', TABS[i][0]===S.tab));
+  document.querySelectorAll('#presets .chip').forEach((c,i)=>c.setAttribute('aria-selected', (DATA.presets||[])[i] && DATA.presets[i].id===S.preset));
+}
+
+/* ---------- данные текущего вида ---------- */
+function presetOf(id){ return (DATA.presets||[]).find(p=>p.id===id) || (DATA.presets||[])[0] || null; }
+function curTf(){ return S.tf; }                     // ТФ выбирается пикером в обеих вкладках
+function curCandles(){ return DATA.candles[S.pair+'|'+curTf()] || []; }
+function curChannel(){ return DATA.channel[S.pair+'|'+curTf()] || null; }
+function curLevels(){ return (DATA.levels && DATA.levels[S.pair+'|'+curTf()]) || null; }
+function curBT(){ return (DATA.bt && DATA.bt[S.preset+'|'+S.pair+'|'+curTf()]) || null; }
+function curNq(){ return (DATA.nq && DATA.nq[S.pair+'|'+curTf()]) || null; }
+function curCmb(){ return (DATA.cmb && DATA.cmb[S.pair+'|'+curTf()]) || null; }
+function curVp(){ return (DATA.vp && DATA.vp[S.pair+'|'+curTf()]) || null; }
+function nqActive(){ const pr=presetOf(S.preset); return S.tab==='strat' && pr && pr.nqqe && !!curNq(); }
+function curTrades(){
+  if(S.tab==='strat'){                              // бэктест: входы/выходы как «сделки» (то же рисование)
+    const b=curBT(); if(!b) return [];
+    const tu=300, evs=[];                            // размер входа как в пресете (trade_usd)
+    for(const m of (b.e||[])) evs.push({t:m[0], s:'b', p:m[1]});
+    for(const m of (b.x||[])) evs.push({t:m[0], s:'s', p:m[1]});
+    evs.sort((a,c)=>a.t-c.t);
+    let qacc=0; const out=[];
+    for(const ev of evs){ if(ev.s==='b'){ const q=tu/ev.p; qacc+=q; out.push({t:ev.t,s:'b',p:ev.p,q,u:tu}); }
+      else { out.push({t:ev.t,s:'s',p:ev.p,q:qacc,u:qacc*ev.p}); qacc=0; } }
+    return out;
+  }
+  return DATA.trades[S.bot+'|'+S.pair] || [];
+}
+
+/* ---------- канвас/вид ---------- */
+const cv=$('#cv'); const ctx=cv.getContext('2d'); let W=0,H=0,DPR=1;
+const tip=$('#tip'); let markerHits=[];
+// start/count — горизонталь (индекс первой видимой свечи и сколько видно = ШИРИНА свечей).
+// yz — вертикальный зум (ВЫСОТА свечей): 1 = автоподбор под видимые, >1 растянуто.
+// yc — вертикальный сдвиг (доля авто-диапазона): 0 = по центру, + = смотрим выше.
+let view={ start:0, count:80, yz:1, yc:0 };
+let GEO={ mainH:1 };              // геометрия последней отрисовки (для вертикального жеста)
+
+function hitMarker(px,py){ let best=null,bd=1e9;
+  for(const m of markerHits){ const d=Math.hypot(px-m.x,py-m.y); if(d<=m.r && d<bd){ bd=d; best=m; } }
+  return best; }
+function showTip(m){ const t=m.t, d=new Date(t.t*1000), buy=t.s==='b', asset=S.pair.replace('FDUSD','');
+  const dt=`${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  const head = buy ? (m.legStart?'▲ Покупка · начало цикла':'▲ Покупка · докуп')
+                   : (m.legClose?'▼ Продажа · закрытие цикла':'▼ Продажа · тейк');
+  let rows = `<div class="r"><span>Цена</span><b>${fmtP(t.p)}</b></div>`+
+    `<div class="r"><span>Кол-во</span><b>${t.q} ${asset}</b></div>`+
+    `<div class="r"><span>Сумма</span><b>${t.u} FDUSD</b></div>`;
+  if(!buy && m.pnl!=null){ const up=m.pnl>=0;
+    rows += `<div class="r"><span>Заработал</span><b class="${up?'up':'down'}">${up?'+':''}${m.pnl.toFixed(2)} FDUSD</b></div>`+
+            `<div class="r"><span>PnL</span><b class="${up?'up':'down'}">${up?'+':''}${m.pnlp.toFixed(2)}%</b></div>`; }
+  if(!buy && m.dur!=null) rows += `<div class="r"><span>Длилась</span><b>${fmtDur(m.dur)}</b></div>`;
+  rows += `<div class="r"><span>Время</span><b>${dt}</b></div>`;
+  tip.innerHTML=`<div class="side ${buy?'buy':'sell'}">${head}</div>`+rows;
+  tip.hidden=false;
+  let tx=m.x+14, ty=m.y-12; const tw=tip.offsetWidth, th=tip.offsetHeight;
+  if(tx+tw>W-4) tx=m.x-tw-14; if(tx<4) tx=4;
+  if(ty+th>H-4) ty=H-th-4; if(ty<4) ty=4;
+  tip.style.left=tx+'px'; tip.style.top=ty+'px'; }
+function hideTip(){ tip.hidden=true; }
+function fitView(){ const n=curCandles().length; view.count=Math.min(90, Math.max(30, n)); view.start=Math.max(0, n-view.count); view.yz=1; view.yc=0; }
+function resize(){ const r=cv.parentElement.getBoundingClientRect(); DPR=Math.min(3, window.devicePixelRatio||1);
+  W=r.width; H=r.height; cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0); draw(); }
+
+const PADR=54, PADL=6, PADT=16, PADB=18, VOLH=0.16;   // PADB — место под подписи времени
+
+function draw(){
+  const C=curCandles(); if(!C.length){ ctx.clearRect(0,0,W,H); return; }
+  const n=C.length;
+  const s=Math.max(0, view.start), e=Math.min(n, view.start+view.count);
+  const i0=Math.floor(s), i1=Math.min(n, Math.ceil(e));
+  const plotW=W-PADR-PADL, plotH=H-PADT-PADB;   // PADB снизу — панели не уезжают под подписи времени
+  const nqOn=(nqActive() || nqTgl) && !!curNq(), nqFrac=nqOn?0.20:0;   // nQQE: пресет «Стратегии» ИЛИ тумблер
+  const cmbAct=cmbOn && !!curCmb(), cmbFrac=cmbAct?0.20:0;   // панель Combined (тумблер)
+  const mainH=plotH*(1-VOLH-nqFrac-cmbFrac), volTop=PADT+mainH+6, volH=plotH*VOLH-6;
+  GEO.mainH=mainH;
+  const nqTop=PADT+mainH+plotH*VOLH+4, nqH=plotH*nqFrac-6;
+  const cmbTop=nqTop+plotH*nqFrac+4, cmbH=plotH*cmbFrac-6;
+  // ценовой диапазон видимого + канал
+  let lo=Infinity, hi=-Infinity, vmax=0;
+  for(let i=i0;i<i1;i++){ lo=Math.min(lo,C[i][3]); hi=Math.max(hi,C[i][2]); vmax=Math.max(vmax,C[i][5]); }
+  const ch=chanOn?curChannel():null;    // канал — тумблер «Канал» в ряду индикаторов
+  if(ch){ for(const i of [i0,i1-1]){ const mid=ch.slope*i+ch.intercept; lo=Math.min(lo,mid-ch.k*ch.std); hi=Math.max(hi,mid+ch.k*ch.std); } }
+  // метки сделок в диапазоне тоже влияют
+  const tr=curTrades(); const sec=tfSec[curTf()]||900; const t0=C[i0][0], t1=C[i1-1][0]+sec;
+  for(const t of tr){ if(t.t>=t0-sec && t.t<=t1){ lo=Math.min(lo,t.p); hi=Math.max(hi,t.p); } }
+  const P = S.tab==='strat' ? null : DATA.pos[S.bot+'|'+S.pair];
+  if(P){ if(P.tp){ lo=Math.min(lo,P.tp); hi=Math.max(hi,P.tp); } if(P.avg){ lo=Math.min(lo,P.avg); hi=Math.max(hi,P.avg); } }
+  const pad=(hi-lo)*0.08||1; lo-=pad; hi+=pad;
+  // ВЕРТИКАЛЬНЫЙ ЗУМ/СДВИГ (высота свечей + движение вверх/вниз): сжимаем авто-диапазон
+  // в yz раз вокруг сдвинутого на yc центра. yz=1,yc=0 → прежний автоподбор.
+  { const rng=hi-lo, cen=(lo+hi)/2 - view.yc*rng, half=rng/2/view.yz; lo=cen-half; hi=cen+half; }
+  const x=i=> PADL + (i - view.start + .5)/view.count*plotW;
+  const y=p=> PADT + (1-(p-lo)/(hi-lo))*mainH;
+  const bw=Math.max(1.5, plotW/view.count*0.62);
+
+  ctx.clearRect(0,0,W,H);
+  // сетка + ценовая шкала
+  ctx.font='10px '+getComputedStyle(document.body).fontFamily;
+  ctx.textBaseline='middle';
+  const steps=5;
+  for(let g=0;g<=steps;g++){ const p=lo+(hi-lo)*g/steps; const yy=y(p);
+    ctx.strokeStyle=COL.line; ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(PADL,yy); ctx.lineTo(PADL+plotW,yy); ctx.stroke(); ctx.globalAlpha=1;
+    ctx.fillStyle=COL.dim; ctx.textAlign='left'; ctx.fillText(fmtP(p), PADL+plotW+6, yy); }
+  // временные метки
+  ctx.textAlign='center';
+  const tickN=Math.min(5, i1-i0);
+  for(let k=0;k<=tickN;k++){ const i=Math.round(i0+(i1-1-i0)*k/tickN); if(i<0||i>=n) continue;
+    const d=new Date(C[i][0]*1000); const lab=(S.tf==='1d')?`${d.getDate()}.${d.getMonth()+1}`:`${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    ctx.fillStyle=COL.faint; ctx.fillText(lab, x(i), H-7); }
+
+  // КАНАЛ регрессии: полупрозрачная ЗОНА между границами + сами границы поярче и
+  // потолще, средняя — пунктиром. Отдельный цвет COL.chan (не путать со свечами/уровнями).
+  if(ch){ const a=view.start, b=view.start+view.count;
+    const yA=o=>y(ch.slope*a+ch.intercept+o), yB=o=>y(ch.slope*b+ch.intercept+o);
+    const up=+ch.k*ch.std, dn=-ch.k*ch.std;
+    ctx.fillStyle=COL.chan; ctx.globalAlpha=.08;              // заливка коридора
+    ctx.beginPath(); ctx.moveTo(x(a),yA(up)); ctx.lineTo(x(b),yB(up));
+    ctx.lineTo(x(b),yB(dn)); ctx.lineTo(x(a),yA(dn)); ctx.closePath(); ctx.fill(); ctx.globalAlpha=1;
+    const seg=(off,dash,alpha,lw)=>{ ctx.strokeStyle=COL.chan; ctx.globalAlpha=alpha; ctx.lineWidth=lw;
+      ctx.setLineDash(dash); ctx.beginPath(); ctx.moveTo(x(a),yA(off)); ctx.lineTo(x(b),yB(off));
+      ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1; };
+    seg(up,[],.9,1.7); seg(dn,[],.9,1.7); seg(0,[6,5],.7,1.3);   // границы жирнее, средняя пунктир
+    // Pearson's R (как в TV LinReg): плотность посадки цены в канал (0..1) — у левого края
+    if(ch.r!=null){ const xl=Math.max(PADL+3, x(a)+3), yl=Math.max(PADT+10, yA(up)-4);
+      ctx.fillStyle=COL.chan; ctx.globalAlpha=.95; ctx.font='9px '+MONO; ctx.textAlign='left'; ctx.textBaseline='bottom';
+      ctx.fillText('R '+ch.r.toFixed(2), xl, yl); ctx.globalAlpha=1; }
+  }
+
+  // объём
+  for(let i=i0;i<i1;i++){ const c=C[i]; const up=c[4]>=c[1]; const h=vmax? (c[5]/vmax)*volH : 0;
+    ctx.fillStyle=up?COL.up:COL.down; ctx.globalAlpha=.28; ctx.fillRect(x(i)-bw/2, volTop+volH-h, bw, h); }
+  ctx.globalAlpha=1;
+
+  // ПАНЕЛЬ nQQE (для сверки: где стратегия ставит вход/выход относительно осциллятора).
+  // Гистограмма = быстрая линия (цвет по зоне: >8 зелёная, <−8 красная, между жёлтая),
+  // синяя линия = медленная (slow), пунктир на ±15 и нулевая. Ряды из data (nq) — то же
+  // вычисление, что видит стратегия, поэтому точки совпадают с логикой.
+  if(nqOn){ const NQ=curNq(), F=NQ.f, Sl=NQ.s;
+    let nlo=-16, nhi=16;
+    for(let i=i0;i<i1;i++){ const a=F[i], b=Sl[i];
+      if(a!=null){ nlo=Math.min(nlo,a); nhi=Math.max(nhi,a); } if(b!=null){ nlo=Math.min(nlo,b); nhi=Math.max(nhi,b); } }
+    const np=(nhi-nlo)*0.08||1; nlo-=np; nhi+=np;
+    const ny=v=> nqTop + (1-(v-nlo)/(nhi-nlo))*nqH;
+    const hline=(v,dash,al)=>{ ctx.strokeStyle=COL.line; ctx.globalAlpha=al; ctx.setLineDash(dash);
+      ctx.beginPath(); ctx.moveTo(PADL,ny(v)); ctx.lineTo(PADL+plotW,ny(v)); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1; };
+    hline(15,[2,3],.4); hline(-15,[2,3],.4); hline(0,[],.6);
+    const y0=ny(0);
+    for(let i=i0;i<i1;i++){ const v=F[i]; if(v==null) continue;
+      const col = v>8?COL.up : (v<-8?COL.down:'#c9b458'); const yv=ny(v);
+      ctx.fillStyle=col; ctx.globalAlpha=.7; ctx.fillRect(x(i)-bw*0.35, Math.min(y0,yv), Math.max(bw*0.7,1.4), Math.abs(yv-y0)||1); }
+    ctx.globalAlpha=1;
+    ctx.strokeStyle=COL.buy; ctx.lineWidth=1.3; ctx.beginPath(); let st=false;
+    for(let i=i0;i<i1;i++){ const v=Sl[i]; if(v==null){ st=false; continue; } const px=x(i), py=ny(v);
+      if(!st){ ctx.moveTo(px,py); st=true; } else ctx.lineTo(px,py); } ctx.stroke();
+    ctx.fillStyle=COL.faint; ctx.font='9px '+MONO; ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.fillText('nQQE', PADL+3, nqTop+8); }
+
+  // ПАНЕЛЬ Combined (индикатор владельца из TradingView): RSI (синяя) + StochRSI (красная) +
+  // MFI (фиолетовая) на шкале 0..100, пунктирные полосы 80/50/20. Ряды из data.cmb — точная
+  // копия его Pine (см. indicators.combined).
+  if(cmbAct){ const CM=curCmb();
+    const ny=v=> cmbTop + (1-v/100)*cmbH;
+    const band=(v,col,al)=>{ ctx.strokeStyle=col; ctx.globalAlpha=al; ctx.setLineDash([2,3]);
+      ctx.beginPath(); ctx.moveTo(PADL,ny(v)); ctx.lineTo(PADL+plotW,ny(v)); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1; };
+    band(80,COL.down,.45); band(50,COL.line,.5); band(20,COL.up,.45);
+    const line=(arr,col)=>{ ctx.strokeStyle=col; ctx.lineWidth=1.3; ctx.globalAlpha=.92; ctx.beginPath(); let st=false;
+      for(let i=i0;i<i1;i++){ const v=arr&&arr[i]; if(v==null){ st=false; continue; } const px=x(i), py=ny(v);
+        if(!st){ ctx.moveTo(px,py); st=true; } else ctx.lineTo(px,py); } ctx.stroke(); ctx.globalAlpha=1; };
+    line(CM.r,'#5b9bd5'); line(CM.s,COL.down); line(CM.m,COL.buy);
+    const last=a=> (a && a[i1-1]!=null) ? a[i1-1] : '—';
+    ctx.fillStyle=COL.faint; ctx.font='9px '+MONO; ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.fillText('Combined  RSI '+last(CM.r)+'  Stoch '+last(CM.s)+'  MFI '+last(CM.m), PADL+3, cmbTop+8); }
+
+  // ПРОФИЛЬ ОБЪЁМА (тумблер «Профиль», LuxAlgo): горизонтальная гистограмма справа —
+  // сколько объёма наторговано на каждом ценовом уровне (bull зелёный / bear красный),
+  // уровни ЗОНЫ СТОИМОСТИ (VAL..VAH) ярче. Линии POC (янтарь), VAH/VAL (синие).
+  if(vpOn){ const VP=curVp(); if(VP && VP.rows){
+    const step=VP.step;
+    // Гистограмму профиля (зелёно-красные бары) НЕ рисуем — оставляем только уровни:
+    // ПИКИ ОБЪЁМА (HVN) тонкими синими линиями + POC/VAH/VAL. Чистый график без наложений.
+    if(VP.peak_prices){ ctx.strokeStyle='#2ec7d6'; ctx.globalAlpha=.55; ctx.lineWidth=1; ctx.setLineDash([2,4]);
+      for(const pp of VP.peak_prices){ const yy=y(pp);
+        ctx.beginPath(); ctx.moveTo(PADL,yy); ctx.lineTo(PADL+plotW,yy); ctx.stroke(); }
+      ctx.setLineDash([]); ctx.globalAlpha=1; }
+    const lineAt=(p,col,dash,tag,lw)=>{ if(p==null) return; const yy=y(p);
+      ctx.strokeStyle=col; ctx.globalAlpha=.9; ctx.setLineDash(dash); ctx.lineWidth=lw||1.3;
+      ctx.beginPath(); ctx.moveTo(PADL,yy); ctx.lineTo(PADL+plotW,yy); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1;
+      ctx.fillStyle=col; ctx.fillRect(PADL+plotW, yy-7, PADR, 14);
+      ctx.fillStyle='#fff'; ctx.font='8.5px '+MONO; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(fmtP(p), PADL+plotW+PADR/2, yy);
+      ctx.fillStyle=col; ctx.textAlign='left'; ctx.font='9px '+MONO; ctx.fillText(tag, PADL+5, yy-6); };
+    lineAt(VP.val_price,'#2ec7d6',[4,4],'VAL'); lineAt(VP.vah_price,'#2ec7d6',[4,4],'VAH'); lineAt(VP.poc_price,'#d264a8',[],'POC',2);
+  }}
+
+  // свечи
+  for(let i=i0;i<i1;i++){ const c=C[i]; const up=c[4]>=c[1]; const col=up?COL.up:COL.down;
+    const xc=x(i); ctx.strokeStyle=col; ctx.fillStyle=col; ctx.lineWidth=1.2;
+    // ФИТИЛЬ строго по центру тела (тот же xc) — никакого снапа, чтобы не скакал
+    ctx.beginPath(); ctx.moveTo(xc, y(c[2])); ctx.lineTo(xc, y(c[3])); ctx.stroke();
+    const yo=y(c[1]), yc=y(c[4]); const top=Math.min(yo,yc), hgt=Math.max(1,Math.abs(yc-yo));
+    ctx.fillRect(xc-bw/2, top, bw, hgt); }
+
+  // УРОВНИ ОТКРЫТОЙ ПОЗИЦИИ: средняя (пунктир) и ВЫСТАВЛЕННЫЙ тейк (accent, штрих) —
+  // отличается от исполненного тейка (он показан янтарным бейджем ▼ продажи)
+  const bodyFont=getComputedStyle(document.body).fontFamily;
+  function level(p, color, dash, tag, lw){ const yy=y(p);
+    ctx.strokeStyle=color; ctx.globalAlpha=.92; ctx.setLineDash(dash); ctx.lineWidth=lw||1.3;
+    ctx.beginPath(); ctx.moveTo(PADL,yy); ctx.lineTo(PADL+plotW,yy); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha=1;
+    ctx.fillStyle=color; ctx.fillRect(PADL+plotW, yy-8, PADR, 15);
+    ctx.fillStyle='#fff'; ctx.font='8.5px '+MONO; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(fmtP(p), PADL+plotW+PADR/2, yy);
+    ctx.fillStyle=color; ctx.textAlign='left'; ctx.font='9px '+bodyFont; ctx.fillText(tag, PADL+5, yy-7); }
+  if(P){ if(P.avg) level(P.avg, COL.dim, [2,3], 'средняя'); if(P.tp) level(P.tp, COL.sell, [7,4], 'ТП выставлен'); }
+
+  // УРОВНИ ПОДДЕРЖКИ/СОПРОТИВЛЕНИЯ (тумблер «Уровни»): выбраны по СИЛЕ (касания+объём+
+  // круглое число). Метка: касания ×N, «об.» если объём выше среднего, «○» круглое число;
+  // линия ТОЛЩЕ у сильного уровня — чтобы крепкий уровень читался сразу.
+  if(showLev){ const L=curLevels(); if(L){
+    const tag=(name,o,t)=>{ if(!o) return name+(t?' ×'+t:'');
+      let s=name+(o.t?' ×'+o.t:''); if(o.v>=1.3) s+=' об.'; if(o.r) s+=' ○'; return s; };
+    const lw=o=> (o && (o.v>=1.5 || o.t>=4)) ? 2.1 : ((o && (o.v>=1.2 || o.t>=2)) ? 1.6 : 1.1);
+    if(L.sup!=null) level(L.sup, COL.up, [3,4], tag('поддержка', L.supL, L.sup_t), lw(L.supL));
+    if(L.res!=null) level(L.res, COL.down, [3,4], tag('сопротивление', L.resL, L.res_t), lw(L.resL));
+  }}
+
+  // ГРАНИЦЫ ЦИКЛА: первая покупка (открытие) и продажа, закрывающая позицию (закрытие).
+  // По накоплению кол-ва. У закрытия считаем ДЛИТЕЛЬНОСТЬ сделки (от открытия ноги).
+  const legSet=new Set(), legClose=new Set(), dur=new Map(), pnl=new Map(), pnlp=new Map(), buyIdx=new Map();
+  { let qacc=0, cost=0, openT=null, peak=0, open=false, bi=0;
+    for(const t of tr){
+      if(t.s==='b'){ if(!open){ open=true; openT=t.t; peak=0; bi=0; legSet.add(t); }
+        buyIdx.set(t, bi++);          // 0 = вход, 1 = докуп1, 2 = докуп2 … (для оттенка)
+        cost+=t.u; qacc+=t.q; peak=Math.max(peak,qacc); }
+      else { const avg=qacc>0?cost/qacc:0, soldCost=avg*t.q;
+        pnl.set(t, t.u-soldCost); pnlp.set(t, soldCost>0?(t.u-soldCost)/soldCost*100:0);
+        cost-=soldCost; qacc-=t.q;
+        // закрытие с допуском на ПЫЛЬ (продали почти всё → нога закрыта)
+        if(open && qacc<=Math.max(1e-9, peak*0.05)){ legClose.add(t); dur.set(t, t.t-openT); open=false; qacc=0; cost=0; peak=0; } } } }
+
+  // метки сделок — бейджи, СТОПКОЙ при нескольких на одной свече (как на Binance)
+  markerHits.length=0;
+  const byBar={};
+  for(const t of tr){ if(t.t<t0-sec || t.t>t1) continue;
+    let bi=i0; for(let i=i0;i<i1;i++){ if(C[i][0]<=t.t) bi=i; else break; }
+    (byBar[bi]=byBar[bi]||[]).push(t); }
+  const R=8;
+  for(const k in byBar){ const bi=+k, xc=x(bi); let nb=0, ns=0;
+    for(const t of byBar[k]){ const buy=t.s==='b'; const ls=legSet.has(t), lc=legClose.has(t);
+      const yy = buy ? y(C[bi][3]) + (R+6) + nb++*(R*2+3)
+                     : y(C[bi][2]) - (R+6) - ns++*(R*2+3);
+      // ОТТЕНОК: докупы одной ноги — всё светлее (вход самый насыщенный) → на одной
+      // свече видно, где какой докуп. Продажи — янтарь без оттенка.
+      const idx = buy ? (buyIdx.get(t)||0) : 0;
+      const col = buy ? shade(COL.buy, Math.min(idx*0.26, 0.58)) : COL.sell;
+      const yp = y(t.p), mw = Math.max(bw, 7);   // метка ≈ на ширину свечи
+      // МЕТКА ЦЕНЫ выбранного стиля
+      if(mstyle==='dot'){
+        ctx.fillStyle=col; ctx.beginPath(); ctx.arc(xc,yp,3.2,0,6.2832); ctx.fill();
+        ctx.strokeStyle=COL.bg; ctx.lineWidth=1.4; ctx.stroke();
+      } else if(mstyle==='line'){
+        ctx.strokeStyle=col; ctx.lineWidth=2.6; ctx.lineCap='round';
+        ctx.beginPath(); ctx.moveTo(xc-mw/2, yp); ctx.lineTo(xc+mw/2, yp); ctx.stroke(); ctx.lineCap='butt';
+      } else if(mstyle==='linedot'){
+        ctx.strokeStyle=col; ctx.lineWidth=1.6; ctx.lineCap='round';
+        ctx.beginPath(); ctx.moveTo(xc-mw/2, yp); ctx.lineTo(xc+mw/2, yp); ctx.stroke(); ctx.lineCap='butt';
+        ctx.fillStyle=col; ctx.beginPath(); ctx.arc(xc,yp,2.7,0,6.2832); ctx.fill();
+        ctx.strokeStyle=COL.bg; ctx.lineWidth=1; ctx.stroke();
+      } else if(mstyle==='chev'){
+        ctx.strokeStyle=col; ctx.lineWidth=2.4; ctx.lineJoin='round'; ctx.lineCap='round'; const h=4.5;
+        ctx.beginPath();
+        if(buy){ ctx.moveTo(xc-mw/2, yp+h); ctx.lineTo(xc, yp-h); ctx.lineTo(xc+mw/2, yp+h); }
+        else   { ctx.moveTo(xc-mw/2, yp-h); ctx.lineTo(xc, yp+h); ctx.lineTo(xc+mw/2, yp-h); }
+        ctx.stroke(); ctx.lineCap='butt'; ctx.lineJoin='miter';
+      } else if(mstyle==='bar'){
+        ctx.fillStyle=col; ctx.fillRect(xc-mw/2, yp-1.8, mw, 3.6);
+        ctx.strokeStyle=COL.bg; ctx.lineWidth=.8; ctx.strokeRect(xc-mw/2, yp-1.8, mw, 3.6);
+      }
+      // кольцо начала/закрытия цикла
+      if(ls||lc){ ctx.strokeStyle=col; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(xc,yy,R+4,0,6.2832); ctx.stroke(); }
+      // бейдж тем же оттенком + стрелка контрастным цветом
+      ctx.fillStyle=col; ctx.beginPath(); ctx.arc(xc,yy,R,0,6.2832); ctx.fill();
+      ctx.strokeStyle=COL.bg; ctx.lineWidth=1.6; ctx.stroke();
+      ctx.fillStyle = lumOf(col)>0.62 ? '#14181f' : '#fff'; ctx.beginPath();
+      if(buy){ ctx.moveTo(xc,yy-3.4); ctx.lineTo(xc-3.4,yy+2.2); ctx.lineTo(xc+3.4,yy+2.2); }
+      else   { ctx.moveTo(xc,yy+3.4); ctx.lineTo(xc-3.4,yy-2.2); ctx.lineTo(xc+3.4,yy-2.2); }
+      ctx.closePath(); ctx.fill();
+      markerHits.push({x:xc,y:yy,r:R+4,t,legStart:ls,legClose:lc,dur:dur.get(t),pnl:pnl.get(t),pnlp:pnlp.get(t)});
+    }
+  }
+
+  // кроссхэйр
+  if(cross.on){ const cx=cross.x; let bi=Math.round(view.start + (cx-PADL)/plotW*view.count - .5); bi=Math.max(i0,Math.min(i1-1,bi));
+    const c=C[bi]; const xc=x(bi);
+    ctx.strokeStyle=COL.dim; ctx.globalAlpha=.5; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(xc,PADT); ctx.lineTo(xc,PADT+mainH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PADL,cross.y); ctx.lineTo(PADL+plotW,cross.y); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha=1;
+    const pAt=lo+(1-(cross.y-PADT)/mainH)*(hi-lo);
+    ctx.font='10px '+MONO; ctx.textBaseline='middle';
+    ctx.fillStyle=COL.text; ctx.fillRect(PADL+plotW, cross.y-8, PADR, 16);
+    ctx.fillStyle=COL.bg; ctx.textAlign='left'; ctx.fillText(fmtP(pAt), PADL+plotW+5, cross.y);
+    // ВРЕМЯ снизу под курсором
+    const d=new Date(c[0]*1000);
+    const tl=`${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    const tw=ctx.measureText(tl).width+12; let bx=Math.max(PADL, Math.min(PADL+plotW-tw, xc-tw/2));
+    ctx.fillStyle=COL.text; ctx.fillRect(bx, H-17, tw, 15);
+    ctx.fillStyle=COL.bg; ctx.textAlign='center'; ctx.fillText(tl, bx+tw/2, H-9);
+    updateReadout(c);
+  } else updateReadout(C[i1-1]);
+}
+
+function updateReadout(c){ if(!c){ $('#readout').innerHTML=''; return; }
+  const up=c[4]>=c[1]; const d=new Date(c[0]*1000);
+  const dt=`${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  $('#readout').innerHTML =
+    `<span>${dt}</span><span>О <b>${fmtP(c[1])}</b></span><span>М <b>${fmtP(c[2])}</b></span>`+
+    `<span>Н <b>${fmtP(c[3])}</b></span><span>З <b class="${up?'up':'down'}">${fmtP(c[4])}</b></span>`;
+}
+
+/* ---------- статистика ---------- */
+function buildStats(){
+  const tr=curTrades(); const buys=tr.filter(t=>t.s==='b'), sells=tr.filter(t=>t.s==='s');
+  const last=tr[tr.length-1];
+  const el=$('#stats'); el.innerHTML='';
+  const add=(k,v,cls)=>{ const s=document.createElement('div'); s.className='stat';
+    s.innerHTML=`<div class="k">${k}</div><div class="v ${cls||''}">${v}</div>`; el.appendChild(s); };
+  if(S.tab==='strat'){                              // бэктест-пресет: гипотетический итог на окне
+    const b=curBT();
+    if(!b){ add('Бэктест','нет данных'); return; }
+    add('Сделок', b.n||0);
+    add('Винрейт', b.w!=null? b.w+'%':'—', (b.w!=null&&b.w>=60)?'buy':(b.w!=null&&b.w<40?'sell':''));
+    add('P&L', (b.pnl>=0?'+':'')+ (b.pnl||0).toFixed(2), b.pnl>=0?'buy':'sell');
+    add('Входов', buys.length, 'buy');
+    if(b.open) add('Сейчас','в позиции','buy');
+    return;
+  }
+  add('Покупок', buys.length, 'buy');
+  add('Продаж', sells.length, 'sell');
+  if(last){ const d=new Date(last.t*1000);
+    add('Последняя', (last.s==='b'?'куп ':'прод ')+fmtP(last.p), last.s==='b'?'buy':'sell');
+    add('Когда', `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`); }
+  else add('Сделки', 'нет');
+  // PNL ПО ПАРЕ: реализованный (закрытые сделки, средняя себестоимость) + нереализованный
+  // (открытая позиция vs текущая цена). Комиссии мейкера ~0 (FDUSD) — считаем по цене сделки.
+  let q=0, cost=0, real=0, closedCost=0;
+  for(const t of tr){
+    if(t.s==='b'){ q+=t.q; cost+=t.p*t.q; }
+    else { const avg=q>1e-9? cost/q : t.p; const sq=Math.min(t.q, q>0?q:t.q);
+      real+=(t.p-avg)*sq; closedCost+=avg*sq; cost-=avg*sq; q-=sq; if(q<0) q=0; } }
+  const _cc=curCandles(); const cur=_cc.length? _cc[_cc.length-1][4] : null;
+  const fpnl=(u,p)=> (u>=0?'+':'')+u.toFixed(2)+'$ ('+(p>=0?'+':'')+p.toFixed(1)+'%)';
+  add('Реализ.', sells.length? fpnl(real, closedCost>0? real/closedCost*100 : 0) : '—',
+      sells.length? (real>=0?'buy':'sell') : '');
+  if(q>1e-8 && cur){ const avg=cost/q; add('Нереализ.', fpnl((cur-avg)*q, (cur/avg-1)*100),
+      (cur-avg)>=0?'buy':'sell'); }
+  // ПОДСКАЗКА: сколько сделок старше окна текущего ТФ (их меток на графике не видно — крупнее ТФ)
+  const c=DATA.candles[S.pair+'|'+S.tf]||[]; const w0=c.length?c[0][0]:0;
+  const older=tr.filter(t=>t.t<w0).length;
+  if(older) add('Старее окна', older+' — открой 1d', 'sell');
+}
+
+/* ---------- жесты ---------- */
+let cross={on:false,x:0,y:0}; let tapC=null; let lastTap=0;
+const ptrs=new Map(); let pinch=null, panLast=null;
+cv.addEventListener('pointerdown',e=>{ cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===2){ const p=[...ptrs.values()];
+    // щипок помним ОТДЕЛЬНО по осям: разброс по X → ширина, по Y → высота (независимо)
+    pinch={ dx:Math.abs(p[0].x-p[1].x), dy:Math.abs(p[0].y-p[1].y),
+            count:view.count, start:view.start, yz:view.yz,
+            cx:(p[0].x+p[1].x)/2 }; tapC=null; }
+  else { panLast={x:e.clientX,y:e.clientY}; cross.on=false; tapC={x:e.clientX,y:e.clientY,moved:false}; } });
+cv.addEventListener('pointermove',e=>{
+  const rect=cv.getBoundingClientRect();
+  if(ptrs.has(e.pointerId)) ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch && ptrs.size===2){ const p=[...ptrs.values()];
+    const dx=Math.abs(p[0].x-p[1].x), dy=Math.abs(p[0].y-p[1].y);
+    const n=curCandles().length; const plotW=W-PADR-PADL;
+    // ГОРИЗОНТАЛЬНЫЙ разброс пальцев → ШИРИНА свечей (зум вокруг центра щипка)
+    if(pinch.dx>24 && dx>4){ const f=Math.max(.3,Math.min(3, pinch.dx/dx));
+      let nc=Math.max(15, Math.min(n, pinch.count*f));
+      const focus=pinch.start + (pinch.cx-rect.left-PADL)/plotW*pinch.count;
+      view.count=nc; view.start=Math.max(0, Math.min(n-Math.min(nc,n), focus-(pinch.cx-rect.left-PADL)/plotW*nc)); }
+    // ВЕРТИКАЛЬНЫЙ разброс пальцев → ВЫСОТА свечей (1 = автоподбор, до 8× выше)
+    if(pinch.dy>24 && dy>4){ const g=Math.max(.3,Math.min(4, dy/pinch.dy));
+      view.yz=Math.max(1, Math.min(8, pinch.yz*g)); }
+    draw(); return; }
+  if(panLast!=null && ptrs.size===1){ const dx=e.clientX-panLast.x, dy=e.clientY-panLast.y;
+    panLast={x:e.clientX,y:e.clientY};
+    if(tapC && Math.abs(e.clientX-tapC.x)+Math.abs(e.clientY-tapC.y)>6){ tapC.moved=true; hideTip(); }
+    const plotW=W-PADR-PADL; const n=curCandles().length;
+    view.start=Math.max(0, Math.min(Math.max(0,n-8), view.start - dx/plotW*view.count));
+    view.yc -= dy/(GEO.mainH*view.yz);      // тянем в любую сторону: палец держит точку графика
+    draw(); return; }
+  // hover (десктоп): над меткой — тултип, иначе кроссхэйр
+  if(e.pressure===0 && e.pointerType==='mouse'){ const px=e.clientX-rect.left, py=e.clientY-rect.top;
+    const m=hitMarker(px,py);
+    if(m){ cross.on=false; showTip(m); draw(); }
+    else { hideTip(); cross={on:true,x:px,y:py}; draw(); } }
+});
+function endPtr(e){ ptrs.delete(e.pointerId); if(ptrs.size<2) pinch=null; if(ptrs.size===0) panLast=null; }
+cv.addEventListener('pointerup',e=>{
+  if(tapC && !tapC.moved && ptrs.size===1){ const r=cv.getBoundingClientRect();
+    const m=hitMarker(tapC.x-r.left, tapC.y-r.top);
+    if(m){ showTip(m); lastTap=0; }
+    else { hideTip();
+      if(Date.now()-lastTap<300){ fitView(); draw(); lastTap=0; }   // 2 тапа по пустому → сброс
+      else { if(cross.on){ cross.on=false; draw(); } lastTap=Date.now(); } } }
+  tapC=null; endPtr(e); });
+cv.addEventListener('pointercancel',e=>{ tapC=null; endPtr(e); });
+cv.addEventListener('pointerleave',()=>{ if(cross.on){ cross.on=false; draw(); }});
+// долгий тап → кроссхэйр на тач
+let holdT=null;
+cv.addEventListener('touchstart',e=>{ if(e.touches.length===1){ holdT=setTimeout(()=>{ const r=cv.getBoundingClientRect();
+  cross={on:true,x:e.touches[0].clientX-r.left,y:e.touches[0].clientY-r.top}; panLast=null; draw(); },260); } },{passive:true});
+cv.addEventListener('touchmove',e=>{ if(cross.on && e.touches.length===1){ const r=cv.getBoundingClientRect();
+  cross.x=e.touches[0].clientX-r.left; cross.y=e.touches[0].clientY-r.top; draw(); } if(holdT){clearTimeout(holdT);holdT=null;} },{passive:true});
+cv.addEventListener('touchend',()=>{ if(holdT){clearTimeout(holdT);holdT=null;} if(cross.on){ setTimeout(()=>{cross.on=false;draw();},1400);} },{passive:true});
+cv.addEventListener('wheel',e=>{ e.preventDefault(); const n=curCandles().length; const rect=cv.getBoundingClientRect();
+  // Shift+колесо → высота. С Shift браузер часто кладёт прокрутку в deltaX (deltaY=0),
+  // поэтому берём НЕнулевую ось — иначе зум шёл бы только в одну сторону.
+  if(e.shiftKey){ const d=e.deltaY||e.deltaX; const g=d>0?0.9:1.1; view.yz=Math.max(1,Math.min(8,view.yz*g)); draw(); return; }
+  const plotW=W-PADR-PADL; const focus=view.start+(e.clientX-rect.left-PADL)/plotW*view.count;
+  const f=e.deltaY>0?1.1:.9; let nc=Math.max(15,Math.min(n,view.count*f));
+  view.count=nc; view.start=Math.max(0,Math.min(n-Math.min(nc,n), focus-(e.clientX-rect.left-PADL)/plotW*nc)); draw(); },{passive:false});
+cv.addEventListener('dblclick',()=>{ fitView(); draw(); });   // двойной клик → сброс масштаба/сдвига
+
+/* ---------- синхронизация ---------- */
+// УМНЫЙ ТФ: подобрать таймфрейм, чьё окно свечей (последние ~200) покрывает СТАРЕЙШУЮ сделку
+// выбранного бота по паре. Иначе на 15m старые сделки уходят за левый край (их не видно).
+// Берём наименьший подходящий ТФ (максимум деталей); если текущий уже покрывает — не трогаем.
+function autoTf(){
+  const tr=DATA.trades[S.bot+'|'+S.pair]; if(!tr||!tr.length) return;   // сделок нет — ТФ не меняем
+  const oldest=Math.min.apply(null, tr.map(t=>t.t));
+  const covers=tf=>{ const c=DATA.candles[S.pair+'|'+tf]; return c&&c.length&&c[0][0]<=oldest; };
+  if(covers(S.tf)) return;                                              // текущий ТФ уже показывает всё
+  for(const tf of DATA.tfs){ if(covers(tf)){ S.tf=tf; return; } }
+  S.tf=DATA.tfs[DATA.tfs.length-1];                                     // даже 1d не покрывает — самый крупный
+}
+function sync(){ markSel(); fitView(); buildStats(); hideTip(); cross.on=false;
+  const b=DATA.bots.find(x=>x.id===S.bot); $('#botsub').textContent=b?b.name:'';
+  if(!$('#botinfo').hidden) fillInfo(); draw(); }
+
+/* ---------- инфо о боте (кнопка i) ---------- */
+function fillInfo(){ const b=DATA.bots.find(x=>x.id===S.bot)||{};
+  const tag=(b.variant && b.variant!=='main') ? `<span class="bi-tag">${b.variant}</span>` : '';
+  $('#botinfo').innerHTML=`<div class="bi-title">${(b.name||'').split(' · ')[0]}${tag}</div>`+
+    `<div class="bi-desc">${b.desc||'Описание недоступно.'}</div>`; }
+function toggleInfo(){ const el=$('#botinfo'), open=el.hidden;
+  if(open){ fillInfo(); el.hidden=false; } else el.hidden=true;
+  $('#infobtn').setAttribute('aria-expanded', open?'true':'false'); }
+$('#infobtn').onclick=e=>{ e.stopPropagation(); toggleInfo(); };
+document.addEventListener('click', e=>{ const el=$('#botinfo');
+  if(!el.hidden && !el.contains(e.target) && e.target.id!=='infobtn'){ el.hidden=true; $('#infobtn').setAttribute('aria-expanded','false'); } });
+
+/* ---------- тема ---------- */
+$('#theme').onclick=()=>{ const cur=document.documentElement.getAttribute('data-theme')
+    || (matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  document.documentElement.setAttribute('data-theme', cur==='dark'?'light':'dark'); refreshColors(); draw(); };
+
+/* ---------- живые данные + пароль (AES-GCM, расшифровка прямо в браузере) ---------- */
+let PW = localStorage.getItem('dashpw') || null, started=false, lastVer=null, curSig=null;
+const _b64 = s => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+function listsSig(){ return DATA.bots.map(b=>b.id).join(',')+'|'+DATA.pairs.join(',')+'|'+DATA.tfs.join(','); }
+async function fetchVer(){ const r=await fetch('ver?_='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('net'); return (await r.text()).trim(); }
+async function checkApp(){ try{ const r=await fetch('app?_='+Date.now(),{cache:'no-store'}); if(!r.ok) return;
+  const v=(await r.text()).trim();     // новая версия страницы на сервере → перезагрузить (кэш обходим query)
+  if(v && v!==APP_VER && !sessionStorage.getItem('reloading')){ sessionStorage.setItem('reloading','1');
+    location.replace(location.pathname+'?_v='+encodeURIComponent(v)+'.'+Date.now()); }   // уникальный URL — iOS не отдаст старую копию
+}catch(e){} }
+async function fetchEnvelope(){ const r=await fetch('data.json?_='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('net'); return r.json(); }
+async function decryptEnvelope(env, pw){
+  const base=await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  const key=await crypto.subtle.deriveKey({name:'PBKDF2', salt:_b64(env.salt), iterations:env.it, hash:'SHA-256'},
+    base, {name:'AES-GCM', length:256}, false, ['decrypt']);
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM', iv:_b64(env.iv)}, key, _b64(env.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+async function loadData(){ const env=await fetchEnvelope();
+  if(env && env.ct && env.salt){ if(!PW){ const e=new Error('need'); e.need=1; throw e; } return await decryptEnvelope(env, PW); }
+  return env;   // нешифрованные данные (если пароль на сервере не задан)
+}
+function setLive(ok){ const el=$('#snaplabel'); if(!ok){ el.textContent='нет связи'; return; }
+  const g=DATA && DATA.generated ? new Date(DATA.generated*1000) : null;
+  el.textContent = g ? ('обновлено '+String(g.getHours()).padStart(2,'0')+':'+String(g.getMinutes()).padStart(2,'0')) : 'онлайн'; }
+function showGate(msg){ $('#gate').hidden=false; $('#gateerr').textContent=msg||''; setTimeout(()=>$('#gatepw').focus(),50); }
+function hideGate(){ $('#gate').hidden=true; }
+async function boot(){
+  let d;
+  try{ d=await loadData(); }
+  catch(e){
+    if(e && e.need){ showGate(); return; }
+    if(e && e.name==='OperationError'){ PW=null; localStorage.removeItem('dashpw'); showGate('Неверный пароль, попробуйте ещё'); return; }
+    $('#snaplabel').textContent='нет связи, повтор…'; setTimeout(boot,5000); return;
+  }
+  DATA=d; hideGate(); lastVer = DATA.generated ? String(DATA.generated) : lastVer;
+  sessionStorage.removeItem('reloading');       // успешно загрузились — снять флаг авто-перезагрузки
+  if(!started){ started=true;
+    S={ bot:DATA.bots[0].id, pair:DATA.pairs[0], tf:DATA.tfs[0], tab:'hist',
+        preset:(DATA.presets&&DATA.presets[0]?DATA.presets[0].id:null) };
+    autoTf();                                     // сразу открыть на ТФ, где видны прошлые сделки бота
+    refreshColors(); buildPickers(); curSig=listsSig(); fitView(); buildStats(); setLive(true);
+    new ResizeObserver(resize).observe(cv.parentElement);
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{ refreshColors(); draw(); });
+    requestAnimationFrame(()=>{ resize(); const b=DATA.bots.find(x=>x.id===S.bot); $('#botsub').textContent=b.name; });
+    setInterval(refresh, 30000);
+    setInterval(checkApp, 30000); checkApp();
+  } else { setLive(true); markSel(); buildStats(); draw(); }
+}
+async function refresh(){
+  let v; try{ v=await fetchVer(); }catch(e){ setLive(false); return; }
+  if(v && v===lastVer){ setLive(true); return; }               // не менялось — тяжёлый файл не качаем
+  let d; try{ d=await loadData(); }
+  catch(e){ if(e && e.name==='OperationError'){ PW=null; localStorage.removeItem('dashpw'); showGate('Пароль изменился, введите заново'); return; } setLive(false); return; }
+  DATA=d; lastVer = DATA.generated ? String(DATA.generated) : v; setLive(true);
+  const sig=listsSig();
+  if(sig!==curSig){ buildPickers(); curSig=sig; }              // список ботов/пар изменился — пересобрать
+  if(!DATA.bots.find(b=>b.id===S.bot)) S.bot=DATA.bots[0].id;   // выбор мог устареть
+  if(!DATA.pairs.includes(S.pair)) S.pair=DATA.pairs[0];
+  if(!DATA.tfs.includes(S.tf)) S.tf=DATA.tfs[0];
+  markSel(); buildStats(); draw();                              // вид (зум/пара/ТФ) сохраняем
+}
+$('#gateok').onclick=()=>{ const v=$('#gatepw').value; if(!v) return; PW=v; localStorage.setItem('dashpw',PW); $('#gatepw').value=''; boot(); };
+$('#gatepw').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#gateok').click(); } });
+boot();
+</script>
+</body>
+</html>
