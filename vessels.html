@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Сосуды циклов · бот003</title>
+<style>
+  html,body{ margin:0; background:#151615; color:#e8e6df; font:15px/1.5 -apple-system,system-ui,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:900px; margin:0 auto; padding:14px 10px 40px; }
+  .device{ background:#2a2c2b; border-radius:22px; padding:16px 14px 12px; box-shadow:inset 0 0 0 2px #3a3d3a; }
+  .device h1{ margin:0; font-size:15px; font-weight:500; letter-spacing:.14em; text-transform:uppercase; color:#9a988f; display:flex; justify-content:space-between; gap:8px; }
+  .device h1 span{ letter-spacing:0; text-transform:none; font-weight:400; font-size:13px; }
+  .top{ display:flex; gap:18px; flex-wrap:wrap; margin:12px 0 14px; }
+  .top div small{ display:block; color:#9a988f; font-size:11.5px; letter-spacing:.08em; }
+  .big{ font-size:26px; font-weight:700; color:#cfe6b8; font-variant-numeric:tabular-nums; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; }
+  .card{ background:#1f2120; border:1px solid #353834; border-radius:14px; padding:10px 10px 8px; }
+  .card h2{ margin:0; font-size:15px; font-weight:600; display:flex; justify-content:space-between; gap:6px; }
+  .card .sub{ font-size:12px; color:#9a988f; margin:2px 0 6px; }
+  svg{ display:block; width:100%; height:auto; }
+  .muted{ color:#9a988f; } .up{ color:#9fd88a; } .down{ color:#e0857a; }
+  .note{ font-size:13px; color:#9a988f; margin:12px 0 0; }
+  .below{ margin-top:14px; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  table{ width:100%; border-collapse:collapse; font-size:13.5px; }
+  th,td{ text-align:left; padding:6px 8px; border-bottom:1px solid #2e302e; white-space:nowrap; }
+  th{ color:#9a988f; font-weight:500; } td.num,th.num{ text-align:right; font-variant-numeric:tabular-nums; }
+  a{ color:#9fb9d8; }
+  .gate{ position:fixed; inset:0; background:#151615; display:flex; align-items:center; justify-content:center; z-index:9; }
+  .gate[hidden]{ display:none; }
+  .gate-card{ background:#2a2c2b; border-radius:16px; padding:24px 22px; width:min(320px,86vw); text-align:center; }
+  .gate-title{ font-size:18px; font-weight:500; } .gate-sub{ color:#9a988f; font-size:13px; margin:4px 0 14px; }
+  .gate-input{ width:100%; box-sizing:border-box; font-size:16px; padding:10px 12px; border-radius:10px; border:1px solid #444; background:#1c1d1c; color:#e8e6df; }
+  .gate-btn{ margin-top:10px; width:100%; font-size:16px; padding:10px; border-radius:10px; border:0; background:#4b5a44; color:#fff; }
+  .gate-err{ color:#e0857a; font-size:13px; min-height:18px; margin-top:8px; }
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate" hidden>
+  <div class="gate-card">
+    <div class="gate-title">Сосуды циклов</div>
+    <div class="gate-sub">Тот же пароль, что у обзора</div>
+    <input class="gate-input" id="gatepw" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="пароль">
+    <button class="gate-btn" id="gateok">Открыть</button>
+    <div class="gate-err" id="gateerr"></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="device">
+    <h1>Сосуды циклов <span id="snaplabel">…</span></h1>
+    <div class="top">
+      <div><small>В РАБОТЕ</small><span class="big" id="inwork">—</span></div>
+      <div><small>ОБЕЩАНО СТУПЕНЯМИ</small><span class="big" id="planned">—</span></div>
+      <div><small>ОТКРЫТЫХ ЦИКЛОВ</small><span class="big" id="cnt">—</span></div>
+    </div>
+    <div class="grid" id="grid"></div>
+  </div>
+  <div class="below" id="below"></div>
+  <p class="note">Сосуд — цикл, вода — цена. Край сосуда — цель на бирже: налилось до края, и продажа
+    срабатывает сама. Пунктир — средняя покупка: выше него вода означает прибыль. Краны слева — ступени
+    докупа из плана ядра: сказано, сколько долить и куда после этого переедет цель.
+    <a href="index.html">Обзор с графиками</a> · <a href="wolf.html">Ну, погоди!</a></p>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+let DATA=null;
+const F=(n,d=2)=>n==null?'—':Number(n).toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d});
+const P=v=>v==null?'—':F(v, Math.abs(v)<10?4:2);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hm=ts=>{ const d=new Date(ts*1000); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); };
+const age=ot=>{ if(!ot) return '—'; const h=(Date.now()/1000-ot)/3600;
+  return h<24 ? F(h,0)+' ч' : F(h/24,1)+' сут'; };
+
+/* СОСУД. Считает страница только пиксели: доли пути, новые средние и цели приезжают
+   из Python (`vessels_view` + `_ladder_view`).
+
+   ШКАЛА С РАЗРЫВОМ, И ЭТО НЕ УКРАШЕНИЕ. Ступень спасения стоит глубоко: на живом
+   SOL-13 кран на 97.50 при средней 105.37 — семь часовых ATR вниз. Тянуть одну линейку
+   от него до цели значит сплющить всю рабочую часть (средняя → цель, 0.5%) в три
+   пикселя, где подписи налезают друг на друга. Поэтому рабочая зона занимает верх
+   сосуда, а всё, что глубже полутора ATR под ценой, уходит в сжатый «подвал» под
+   изломом. */
+function vessel(c, biggest){
+  const W=352,H=340, gx=66, gw=104, top=20, bot=H-26;
+  if(c.avg==null || c.price==null || c.tp==null)      // нечего наливать и не во что
+    return `<p class="note" style="margin:8px 0 10px">${c.stale?'Цена этой пары протухла — уровень воды нарисовать нечем.':'У цикла нет цели: сосуд без края не рисуем.'}</p>`;
+  const atr=(c.atr_pct? c.avg*c.atr_pct/100 : Math.abs(c.tp-c.avg)) || Math.abs(c.avg)*0.005;
+  const upv=[]; (c.ups||[]).forEach(u=>{ if(u.level!=null) upv.push(u.level); if(u.target!=null) upv.push(u.target); });
+  const hiRaw=Math.max(c.tp, c.price, ...upv);
+  const base=Math.min(c.price, c.avg)-1.5*atr;        // ниже этого — «подвал»
+  const deep=(c.steps||[]).map(st=>st.level).filter(l=>l<base);
+  const lo=deep.length?Math.min(...deep)-0.5*atr:base;
+  const hi=hiRaw+(hiRaw-base)*0.10;
+  const mainH=(bot-top)*(deep.length?0.74:1), lowH=(bot-top)-mainH;
+  const brk=top+mainH;
+  const y=v=>{
+    if(v>=base) return top+(hi-v)/(hi-base)*mainH;
+    if(!deep.length || lo>=base) return bot;
+    return brk+Math.min(1,(base-v)/(base-lo))*lowH;
+  };
+  // ШИРИНА — ДОЛЯ ОТ САМОГО КРУПНОГО ЦИКЛА НА ЭКРАНЕ, а не от круглого числа долларов:
+  // «2000 $» откалибровано под сегодняшний депозит и на другом замолчало бы (правило
+  // владельца: порог выводится из величин, которые он защищает).
+  const wid=Math.max(52,Math.min(gw,Math.sqrt(Math.max(c.usd,1)/Math.max(biggest,1))*gw));
+  const x0=gx+(gw-wid)/2, x1=x0+wid;
+  const yw=Math.max(top+2,Math.min(bot,y(c.price)));
+  const done=c.price>=c.tp;
+  const id='v'+String(c.n).replace(/[^A-Za-z0-9]/g,'');
+  const labels=[];   // подписи разводим по высоте, иначе на узкой шкале они слипаются
+  const RIGHT=W-(x1+14);           // сколько места остаётся справа от сосуда
+  const say=(yy,text,color,size,sub)=>labels.push({y:yy,t:text,c:color,s:size||10.5,sub:sub});
+  let g=`<rect x="${x0}" y="${top}" width="${wid}" height="${bot-top}" rx="9" fill="#151812"/>`;
+  g+=`<clipPath id="${id}"><rect x="${x0}" y="${top}" width="${wid}" height="${bot-top}" rx="9"/></clipPath>
+    <g clip-path="url(#${id})"><rect x="${x0}" y="${yw}" width="${wid}" height="${bot-yw}" fill="${done?'#4ea3d8':'#3f7fa8'}"/>
+    <path d="M${x0} ${yw} q ${wid*0.25} -6 ${wid*0.5} 0 q ${wid*0.25} 6 ${wid*0.5} 0 L${x1} ${yw+8} L${x0} ${yw+8} z" fill="${done?'#69b9e6':'#4e92b8'}"/></g>`;
+  g+=`<rect x="${x0}" y="${top}" width="${wid}" height="${bot-top}" rx="9" fill="none" stroke="#8ea0a8" stroke-width="2.5"/>`;
+  const ty=y(c.tp);
+  g+=`<line x1="${x0-10}" y1="${ty}" x2="${x1+10}" y2="${ty}" stroke="#8fd66a" stroke-width="2.5"/>`;
+  say(ty, `цель ${P(c.tp)}`, '#8fd66a', 11, `+${F((c.tp/c.avg-1)*100)} % от средней`);
+  const ay=y(c.avg);
+  g+=`<line x1="${x0-10}" y1="${ay}" x2="${x1+10}" y2="${ay}" stroke="#c9c3a8" stroke-width="1.6" stroke-dasharray="5 4"/>`;
+  say(ay, `средняя ${P(c.avg)}`, '#c9c3a8');
+  (c.ups||[]).forEach(u=>{ if(u.level==null) return;
+    if(u.target==null){    // границы не прочитаны — сырую хотелку ядра за цель не выдаём
+      if(u.bounds_unknown) say(y(u.level), `на ${P(u.level)} цель сменится, границы не прочитаны`, '#c9a05c', 10);
+      return; }
+    // Python сказал: цель уже стоит там. На сосуде такую ветку НЕ рисуем вовсе — рядом с
+    // краем «цель 2 539,99» подпись «на 2 540,00 цель станет 2 540,00» была третьей
+    // строкой об одном и том же. Факт остаётся в подстрочнике карточки и в таблице.
+    if(u.moves === false) return;
+    const uy=y(u.target);
+    g+=`<line x1="${x0-6}" y1="${uy}" x2="${x1+6}" y2="${uy}" stroke="#6f9a5c" stroke-width="1.2" stroke-dasharray="2 4"/>`;
+    say(uy, `на ${P(u.level)} цель станет ${P(u.target)}${u.clamped?' (зажата)':''}`, '#6f9a5c', 10); });
+  (c.steps||[]).forEach(st=>{ const sy=y(st.level);
+    g+=`<g><rect x="${x0-30}" y="${sy-4}" width="18" height="8" rx="2" fill="#a97b45"/>
+      <circle cx="${x0-21}" cy="${sy-9}" r="4" fill="#8d6437"/></g>
+      <line x1="${x0-10}" y1="${sy}" x2="${x1+10}" y2="${sy}" stroke="#d8a24a" stroke-width="1.4" stroke-dasharray="3 3"/>`;
+    // проценты считает Python: насколько ступень ниже средней и насколько после неё
+    // опустится цель — владельцу нужны не только абсолютные цены (просьба 03.09)
+    const away=c.atr_pct? `${F(Math.abs(c.price-st.level)/atr,1)} ATR вниз`:'';
+    const below=st.from_avg!=null? `${F(st.from_avg,1)} % от средней`:'';
+    say(sy, `долив ${F(st.usd,0)} $ на ${P(st.level)}`, '#d8a24a', 10.5,
+        [below,away].filter(Boolean).join(', '));
+    if(st.tp_after!=null)
+      say(y(st.tp_after), `цель станет ${P(st.tp_after)}`, '#6f9a5c', 10,
+          st.tp_delta!=null? `${F(st.tp_delta,1)} % к нынешней цели`:null);
+    else if(st.bounds_unknown) say(sy+13, 'границы цели не прочитаны', '#c9a05c', 10);
+  });
+  if(deep.length)   // излом шкалы: ниже него сосуд сжат, и об этом сказано
+    g+=`<path d="M${x0-8} ${brk} l ${wid*0.3} -5 l ${wid*0.4} 10 l ${wid*0.3} -5 h 8" fill="none" stroke="#8ea0a8" stroke-width="1.6" stroke-dasharray="4 3"/>
+      <text x="${x0-14}" y="${brk+4}" font-size="9.5" fill="#8ea0a8" text-anchor="end">сжато</text>`;
+  g+=`<text x="${x0-12}" y="${yw+4}" font-size="10.5" fill="#a9d8ef" text-anchor="end">${P(c.price)}</text>`;
+  if(done) g+=`<text x="${x0+wid/2}" y="${top-6}" font-size="11.5" fill="#8fd66a" text-anchor="middle">налилось до края</text>`;
+  labels.sort((a,b)=>a.y-b.y);
+  let prev=-99;
+  labels.forEach(l=>{
+    // ширина строки в SVG заранее не известна; оцениваем по кеглю (для этого набора
+    // ~0.54 ширины символа) и ужимаем шрифт, пока строка не влезет в правое поле.
+    let sz=l.s;
+    while(sz>8.2 && l.t.length*sz*0.54>RIGHT) sz-=0.5;
+    const step=l.sub?12.5:0;
+    const yy=Math.max(l.y, prev+12.5); prev=yy+step;
+    g+=`<text x="${x1+14}" y="${yy+3.5}" font-size="${sz}" fill="${l.c}">${l.t}</text>`;
+    if(l.sub){ let s2=Math.min(10, sz);
+      while(s2>8 && l.sub.length*s2*0.54>RIGHT) s2-=0.5;
+      g+=`<text x="${x1+14}" y="${yy+15}" font-size="${s2}" fill="${l.c}" opacity=".8">${l.sub}</text>`; }
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="сосуд цикла ${esc(c.n)}">${g}</svg>`;
+}
+/* ветки вверх, которые цель не двигают: на картинке им места нет, но знать о них полезно */
+const idle=c=>{ const u=(c.ups||[]).filter(x=>x.moves===false).map(x=>P(x.level));
+  return u.length? ` · ветка вверх на ${u.join(', ')} цель не меняет` : ''; };
+function draw(){
+  const v=DATA && DATA.vessels;
+  if(!v){ $('#grid').innerHTML='<p class="note">данные ещё не выгружены</p>'; $('#below').innerHTML=''; return; }
+  const cs=v.cycles||[];
+  const biggest=Math.max(1,...cs.map(c=>c.usd||0));
+  $('#inwork').textContent=F(v.in_work)+' $';
+  $('#planned').textContent=F(v.planned)+' $';
+  $('#cnt').textContent=cs.length;
+  $('#grid').innerHTML = cs.length ? cs.map(c=>{
+    const cls=c.pct==null?'muted':(c.pct>=0?'up':'down');
+    return `<div class="card"><h2><span>${esc(c.n)}</span><span class="${cls}">${c.pct==null?'—':(c.pct>=0?'+':'')+F(c.pct)+' %'}</span></h2>
+      <div class="sub">${F(c.usd,0)} $ · идёт ${age(c.ot)} · докупов ${c.adds||0}${c.dust?' · крошка':''}</div>
+      ${vessel(c, biggest)}
+      <div class="sub">${c.fill==null?(c.stale?'цена протухла':'цели нет'):'налито '+F(c.fill*100,0)+' % пути до цели'} ·
+        ${(c.steps||[]).length?'ступеней впереди '+c.steps.length:'ступеней нет'}${idle(c)}</div></div>`;
+  }).join('') : '<p class="note">Открытых циклов нет — наливать нечего.</p>';
+  let rows='';
+  cs.forEach(c=>(c.steps||[]).forEach((st,i)=>{
+    rows+=`<tr><td>${esc(c.n)}</td><td class="num">${i+1}</td><td class="num">${P(st.level)}</td>
+      <td class="num">${F(st.usd,0)} $</td><td class="num">${P(c.avg)} → ${P(st.avg_after)}</td>
+      <td class="num">${P(c.tp)} → ${P(st.tp_after)}${st.tp_delta!=null?' ('+F(st.tp_delta,1)+' %)':''}</td>
+      <td>${st.bounds_unknown?'границы не прочитаны':(st.clamped?'ядро просило '+P(st.tp_said)+', зажато границами':'как назвало ядро')}</td>
+      <td class="num ${c.price!=null&&st.level?'':'muted'}">${c.price!=null&&st.level?F((st.level/c.price-1)*100,1)+' %':'—'}</td>
+      <td class="num ${st.from_avg!=null?'':'muted'}">${st.from_avg!=null?F(st.from_avg,1)+' %':'—'}</td></tr>`;
+  }));
+  $('#below').innerHTML = rows ? `<table><thead><tr><th>цикл</th><th class="num">ступень</th><th class="num">цена долива</th>
+    <th class="num">сумма</th><th class="num">средняя станет</th><th class="num">цель станет</th><th>чья цель</th>
+    <th class="num">цене идти</th><th class="num">от средней</th></tr></thead><tbody>${rows}</tbody></table>`
+    : '<p class="note">Ступеней докупа в планах сейчас нет.</p>';
+}
+
+/* ---------- live data + password (same envelope and the same saved password as index.html) ---------- */
+const APP_VER='3.114.3';   // stamped by the exporter, like index.html
+let PW=localStorage.getItem('dashpw')||null, lastVer=null;
+async function checkApp(){ try{ const r=await fetch('app?_='+Date.now(),{cache:'no-store'}); if(!r.ok) return;
+  const v=(await r.text()).trim();   // a new page version on the server -> reload past the cache (same rule as index.html)
+  if(v && v!==APP_VER && !sessionStorage.getItem('vessels_reloading')){ sessionStorage.setItem('vessels_reloading','1');
+    location.replace(location.pathname+'?_v='+encodeURIComponent(v)+'.'+Date.now()); }
+}catch(e){} }
+const _b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function fetchVer(){ const r=await fetch('ver?_='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('net'); return (await r.text()).trim(); }
+async function fetchEnvelope(){ const r=await fetch('data.json?_='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('net'); return r.json(); }
+async function decryptEnvelope(env,pw){
+  const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
+  const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:_b64(env.salt),iterations:env.it,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:_b64(env.iv)},key,_b64(env.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+async function loadData(){ const env=await fetchEnvelope();
+  if(env && env.ct && env.salt){ if(!PW){ const e=new Error('need'); e.need=1; throw e; } return await decryptEnvelope(env,PW); }
+  return env; }
+function setLive(ok){ const el=$('#snaplabel'); if(!ok){ el.textContent='нет связи'; return; }
+  el.textContent = DATA && DATA.generated ? 'обновлено '+hm(DATA.generated) : 'онлайн'; }
+function showGate(msg){ $('#gate').hidden=false; $('#gateerr').textContent=msg||''; setTimeout(()=>$('#gatepw').focus(),50); }
+async function boot(){
+  let d; try{ d=await loadData(); }
+  catch(e){ if(e&&e.need){ showGate(); return; }
+    if(e&&e.name==='OperationError'){ PW=null; localStorage.removeItem('dashpw'); showGate('Неверный пароль, попробуйте ещё'); return; }
+    $('#snaplabel').textContent='нет связи, повтор…'; setTimeout(boot,5000); return; }
+  DATA=d; $('#gate').hidden=true; lastVer=DATA.generated?String(DATA.generated):lastVer; sessionStorage.removeItem('vessels_reloading'); setLive(true); draw();
+}
+async function refresh(){
+  let v; try{ v=await fetchVer(); }catch(e){ setLive(false); return; }
+  if(v && v===lastVer){ setLive(true); return; }
+  let d; try{ d=await loadData(); }
+  catch(e){ if(e&&e.need){ showGate('Теперь нужен пароль'); return; }   // encryption switched on while the page was open
+    if(e&&e.name==='OperationError'){ PW=null; localStorage.removeItem('dashpw'); showGate('Пароль изменился, введите заново'); return; } setLive(false); return; }
+  DATA=d; lastVer=DATA.generated?String(DATA.generated):v; setLive(true); draw();
+}
+$('#gateok').onclick=()=>{ const v=$('#gatepw').value; if(!v) return; PW=v; localStorage.setItem('dashpw',PW); $('#gatepw').value=''; boot(); };
+$('#gatepw').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#gateok').click(); } });
+boot(); setInterval(refresh,30000); setInterval(checkApp,30000); checkApp();
+</script>
+</body>
+</html>

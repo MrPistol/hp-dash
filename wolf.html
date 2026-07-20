@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ну, погоди! · бот003</title>
+<style>
+  :root{ --lcd:#b6bf9c; --seg:#1d2419; --ghost:rgba(29,36,25,.09); --body:#2a2c2b; --ink:#e8e6df; --dim:#9a988f; }
+  html,body{ margin:0; background:#151615; color:var(--ink); font:15px/1.5 -apple-system,system-ui,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:760px; margin:0 auto; padding:14px 10px 40px; }
+  .device{ background:var(--body); border-radius:22px; padding:16px 16px 12px; box-shadow:inset 0 0 0 2px #3a3d3a; }
+  .device h1{ margin:0 0 10px; font-size:15px; font-weight:500; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); display:flex; justify-content:space-between; }
+  .device h1 span{ letter-spacing:0; text-transform:none; font-weight:400; }
+  .screen{ background:var(--lcd); border-radius:8px; box-shadow:inset 0 0 0 3px #7f8a6c, inset 0 6px 18px rgba(0,0,0,.25); }
+  svg{ display:block; width:100%; height:auto; }
+  .seg{ fill:var(--seg); } .ghost{ fill:var(--ghost); } .line{ stroke:var(--seg); stroke-width:3; fill:none; stroke-linecap:round; }
+  .lcdtext{ font-family:ui-monospace,Menlo,Consolas,monospace; fill:var(--seg); }
+  .lcdlabel{ font-family:ui-monospace,Menlo,Consolas,monospace; fill:var(--seg); font-size:11px; letter-spacing:.08em; }
+  .below{ margin-top:14px; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  table{ width:100%; border-collapse:collapse; font-size:14px; }
+  th,td{ text-align:left; padding:6px 8px; border-bottom:1px solid #2e302e; white-space:nowrap; }
+  th{ color:var(--dim); font-weight:500; } td.num,th.num{ text-align:right; font-variant-numeric:tabular-nums; }
+  .muted{ color:var(--dim); } .up{ color:#9fd88a; } .down{ color:#e0857a; }
+  .note{ font-size:13px; color:var(--dim); margin:10px 0 0; }
+  .gate{ position:fixed; inset:0; background:#151615; display:flex; align-items:center; justify-content:center; z-index:9; }
+  .gate[hidden]{ display:none; }
+  .gate-card{ background:var(--body); border-radius:16px; padding:24px 22px; width:min(320px,86vw); text-align:center; }
+  .gate-title{ font-size:18px; font-weight:500; } .gate-sub{ color:var(--dim); font-size:13px; margin:4px 0 14px; }
+  .gate-input{ width:100%; box-sizing:border-box; font-size:16px; padding:10px 12px; border-radius:10px; border:1px solid #444; background:#1c1d1c; color:var(--ink); }
+  .gate-btn{ margin-top:10px; width:100%; font-size:16px; padding:10px; border-radius:10px; border:0; background:#4b5a44; color:#fff; }
+  .gate-err{ color:#e0857a; font-size:13px; min-height:18px; margin-top:8px; }
+  a{ color:#9fb9d8; }
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate" hidden>
+  <div class="gate-card">
+    <div class="gate-title">Ну, погоди!</div>
+    <div class="gate-sub">Тот же пароль, что у обзора</div>
+    <input class="gate-input" id="gatepw" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="пароль">
+    <button class="gate-btn" id="gateok">Открыть</button>
+    <div class="gate-err" id="gateerr"></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="device">
+    <h1>Ну, погоди! <span id="snaplabel">…</span></h1>
+    <div class="screen"><svg id="lcd" viewBox="0 0 640 360" aria-label="экран игры"></svg></div>
+  </div>
+  <div class="below" id="below"></div>
+  <p class="note">Яйцо — открытый цикл, жёлоб — монета, корзина — цель на бирже. Позиция яйца: сколько пути цена прошла
+    от средней покупки до цели, пятыми долями. Обновление раз в ~5 минут, шагами — как на настоящем экране.
+    <a href="index.html">Обзор с графиками</a> · <a href="vessels.html">Сосуды циклов</a></p>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+let DATA=null;
+const W=640, STEPS=5;
+// chute geometry: hen at the wall, five egg steps, basket near the wolf
+const CHUTES=[ {side:-1, y0:128}, {side:-1, y0:238}, {side:1, y0:128}, {side:1, y0:238} ];
+function eggXY(ci, step){ const c=CHUTES[ci]; const x = c.side<0 ? 96+step*40 : W-96-step*40; return [x, c.y0+step*11]; }
+function henXY(ci){ const c=CHUTES[ci]; return [c.side<0?52:W-52, c.y0-8]; }
+function basketXY(ci){ const c=CHUTES[ci]; return [c.side<0?252:W-252, c.y0+64]; }
+const fmt=(n,d=2)=>n==null?'—':Number(n).toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d});
+const hm=ts=>{ const d=new Date(ts*1000); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); };
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function egg(x,y,cls,extra){ return `<ellipse class="${cls}" cx="${x}" cy="${y}" rx="9" ry="12" transform="rotate(-20 ${x} ${y})"/>${extra||''}`; }
+function hen(x,y,side,cls){ const s=side; return `<g class="${cls}" transform="translate(${x} ${y}) scale(${s} 1)">
+  <ellipse cx="0" cy="0" rx="16" ry="11"/><circle cx="14" cy="-10" r="7"/><polygon points="20,-10 28,-8 20,-6"/>
+  <polygon points="-16,-2 -26,-12 -20,2"/><rect x="-4" y="9" width="3" height="7"/><rect x="4" y="9" width="3" height="7"/></g>`; }
+function wolf(at){
+  // the wolf stands in the middle; arms and basket turn to chute `at` (null = idle)
+  const side = at==null ? 0 : CHUTES[at].side, level = at==null ? 0 : (CHUTES[at].y0<200 ? -1 : 1);
+  const cx=320;
+  let g=`<g class="seg">
+    <ellipse cx="${cx}" cy="250" rx="34" ry="52"/>
+    <circle cx="${cx}" cy="182" r="26"/>
+    <polygon points="${cx-24},${168} ${cx-30},${142} ${cx-8},${160}"/><polygon points="${cx+24},${168} ${cx+30},${142} ${cx+8},${160}"/>
+    <polygon points="${cx-6},${192} ${cx+6},${192} ${cx},${204}"/>
+    <rect x="${cx-22}" y="300" width="14" height="30" rx="4"/><rect x="${cx+8}" y="300" width="14" height="30" rx="4"/>
+  </g>`;
+  // eyes as LCD gaps
+  g+=`<circle cx="${cx-9+side*3}" cy="178" r="3" fill="var(--lcd)"/><circle cx="${cx+9+side*3}" cy="178" r="3" fill="var(--lcd)"/>`;
+  if(at!=null){
+    const [bx,by]=basketXY(at);
+    g+=`<line class="line" x1="${cx+side*30}" y1="${230+level*10}" x2="${bx}" y2="${by-14}"/>`;
+    g+=`<g class="seg"><rect x="${bx-22}" y="${by-8}" width="44" height="18" rx="3"/><path d="M${bx-14} ${by-8} Q${bx} ${by-26} ${bx+14} ${by-8}" fill="none" stroke="var(--seg)" stroke-width="3"/></g>`;
+  } else {
+    g+=`<g class="seg"><rect x="${cx-22}" y="296" width="44" height="18" rx="3"/></g>`;
+  }
+  return g;
+}
+function draw(){
+  const w=DATA && DATA.wolf; const svg=$('#lcd');
+  if(!w){ svg.innerHTML=`<text class="lcdtext" x="320" y="180" text-anchor="middle" font-size="18">данные для игры ещё не выгружены</text>`; $('#below').innerHTML=''; return; }
+  let s='';
+  // ghosts: every segment the screen can show, faintly — like a real LCD
+  for(let ci=0;ci<4;ci++){ const [hx,hy]=henXY(ci); s+=hen(hx,hy,CHUTES[ci].side,'ghost');
+    for(let st=0;st<STEPS;st++){ const [x,y]=eggXY(ci,st); s+=egg(x,y,'ghost'); } }
+  // chute rails
+  for(let ci=0;ci<4;ci++){ const [x0,y0]=eggXY(ci,0), [x1,y1]=eggXY(ci,STEPS-1); s+=`<line class="line" x1="${x0-(CHUTES[ci].side<0?30:-30)}" y1="${y0+16}" x2="${x1+(CHUTES[ci].side<0?26:-26)}" y2="${y1+16}"/>`; }
+  // score
+  const sc=w.score||{};
+  s+=`<text class="lcdlabel" x="320" y="34" text-anchor="middle">СЧЁТ · РЕАЛИЗОВАНО</text>`;
+  s+=`<text class="lcdtext" x="320" y="72" text-anchor="middle" font-size="34" font-weight="700">${(sc.pn>=0?'+':'')+fmt(sc.pn)} $</text>`;
+  s+=`<text class="lcdlabel" x="24" y="34">ПОЙМАНО ${sc.caught||0}</text>`;
+  s+=`<text class="lcdlabel" x="616" y="34" text-anchor="end">РАЗБИТО ${sc.broken||0}</text>`;
+  if(sc.unknown) s+=`<text class="lcdlabel" x="616" y="50" text-anchor="end">БЕЗ СЧЁТА ${sc.unknown}</text>`;
+  // chutes with hens, labels and eggs
+  (w.chutes||[]).forEach((c,ci)=>{ if(ci>=4) return; const side=CHUTES[ci].side; const [hx,hy]=henXY(ci); s+=hen(hx,hy,side,'seg');
+    s+=`<text class="lcdlabel" x="${hx}" y="${hy-24}" text-anchor="middle" font-size="13">${esc(c.coin)}${c.stale?' ?':''}</text>`;
+    const bySt={}; c.eggs.forEach(e=>{ const k=e.step==null?'x':e.step; (bySt[k]=bySt[k]||[]).push(e); });
+    Object.entries(bySt).forEach(([k,arr])=>{
+      if(k==='x'){ // no target or stale price: egg stays in the hen's nest, marked
+        const x=hx, y=hy+22; arr.forEach((e,i)=>{ s+=egg(x-side*i*5, y-i*4, 'seg'); });
+        s+=`<text class="lcdlabel" x="${x+side*18}" y="${y+4}" text-anchor="${side<0?'start':'end'}">?${arr.length>1?'×'+arr.length:''}</text>`; return; }
+      const [x,y]=eggXY(ci,+k);
+      arr.forEach((e,i)=>{ s+=egg(x-side*i*5, y-i*4, 'seg'); });
+      if(arr.length>1) s+=`<text class="lcdlabel" x="${x}" y="${y+26}" text-anchor="middle">×${arr.length}</text>`;
+    });
+  });
+  s+=wolf(w.wolf_at);
+  // idle / empty state must be visible, not silent
+  if(!(w.chutes||[]).length) s+=`<text class="lcdtext" x="320" y="120" text-anchor="middle" font-size="16">ОТКРЫТЫХ ЦИКЛОВ НЕТ — ВОЛК ЖДЁТ</text>`;
+  if(w.more && w.more.length) s+=`<text class="lcdlabel" x="320" y="348" text-anchor="middle">ЕЩЁ ${w.more.length} МОНЕТ ЗА КАДРОМ: ${w.more.map(m=>m.coin).join(', ')}</text>`;
+  else if(w.last_trade) s+=`<text class="lcdlabel" x="320" y="348" text-anchor="middle">ПОСЛЕДНЯЯ СДЕЛКА ${hm(w.last_trade)}</text>`;
+  svg.innerHTML=s;
+
+  // the table under the device: the same numbers in words
+  const posName=e=> e.step==null ? (e.tp?'цена протухла':'без цели') : ['у курицы','четверть пути','полпути','три четверти','у корзины'][e.step];
+  let rows='';
+  (w.chutes||[]).forEach(c=>c.eggs.forEach(e=>{
+    const cls=e.pct==null?'muted':(e.pct>=0?'up':'down');
+    rows+=`<tr><td>${esc(e.n)}${e.dust?' <span class="muted">крошка</span>':''}</td><td class="num">${fmt(e.usd)} $</td>
+      <td class="num">${e.avg!=null?fmt(e.avg,e.avg<10?4:2):'—'}</td><td class="num">${e.tp!=null?fmt(e.tp,e.tp<10?4:2):'—'}</td>
+      <td class="num ${cls}">${e.pct==null?'—':(e.pct>=0?'+':'')+fmt(e.pct)+' %'}</td><td>${posName(e)}</td></tr>`;
+  }));
+  (w.more||[]).forEach(m=>{ rows+=`<tr class="muted"><td>${esc(m.coin)} · ${m.eggs} цикл.</td><td class="num">${fmt(m.usd)} $</td><td colspan="4">за кадром — жёлобов всего четыре</td></tr>`; });
+  $('#below').innerHTML = rows ? `<table><thead><tr><th>цикл</th><th class="num">в работе</th><th class="num">средняя</th><th class="num">цель</th><th class="num">от средней</th><th>где яйцо</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="note">В работе всего ${fmt(w.in_work)} $. Счёт — прибыль записанных продаж по монетам, которые бот торгует сейчас; продажи без записанной себестоимости в счёт не входят${sc.unknown?` (таких ${sc.unknown})`:''}.</p>`
+    : `<p class="note">Открытых циклов нет.</p>`;
+}
+
+/* ---------- live data + password (same envelope and the same saved password as index.html) ---------- */
+const APP_VER='3.114.3';   // stamped by the exporter, like index.html
+let PW=localStorage.getItem('dashpw')||null, lastVer=null;
+async function checkApp(){ try{ const r=await fetch('app?_='+Date.now(),{cache:'no-store'}); if(!r.ok) return;
+  const v=(await r.text()).trim();   // a new page version on the server -> reload past the cache (same rule as index.html)
+  if(v && v!==APP_VER && !sessionStorage.getItem('wolf_reloading')){ sessionStorage.setItem('wolf_reloading','1');
+    location.replace(location.pathname+'?_v='+encodeURIComponent(v)+'.'+Date.now()); }
+}catch(e){} }
+const _b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function fetchVer(){ const r=await fetch('ver?_='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('net'); return (await r.text()).trim(); }
+async function fetchEnvelope(){ const r=await fetch('data.json?_='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('net'); return r.json(); }
+async function decryptEnvelope(env,pw){
+  const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
+  const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:_b64(env.salt),iterations:env.it,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:_b64(env.iv)},key,_b64(env.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+async function loadData(){ const env=await fetchEnvelope();
+  if(env && env.ct && env.salt){ if(!PW){ const e=new Error('need'); e.need=1; throw e; } return await decryptEnvelope(env,PW); }
+  return env; }
+function setLive(ok){ const el=$('#snaplabel'); if(!ok){ el.textContent='нет связи'; return; }
+  el.textContent = DATA && DATA.generated ? 'обновлено '+hm(DATA.generated) : 'онлайн'; }
+function showGate(msg){ $('#gate').hidden=false; $('#gateerr').textContent=msg||''; setTimeout(()=>$('#gatepw').focus(),50); }
+async function boot(){
+  let d; try{ d=await loadData(); }
+  catch(e){ if(e&&e.need){ showGate(); return; }
+    if(e&&e.name==='OperationError'){ PW=null; localStorage.removeItem('dashpw'); showGate('Неверный пароль, попробуйте ещё'); return; }
+    $('#snaplabel').textContent='нет связи, повтор…'; setTimeout(boot,5000); return; }
+  DATA=d; $('#gate').hidden=true; lastVer=DATA.generated?String(DATA.generated):lastVer; sessionStorage.removeItem('wolf_reloading'); setLive(true); draw();
+}
+async function refresh(){
+  let v; try{ v=await fetchVer(); }catch(e){ setLive(false); return; }
+  if(v && v===lastVer){ setLive(true); return; }
+  let d; try{ d=await loadData(); }
+  catch(e){ if(e&&e.need){ showGate('Теперь нужен пароль'); return; }   // encryption switched on while the page was open
+    if(e&&e.name==='OperationError'){ PW=null; localStorage.removeItem('dashpw'); showGate('Пароль изменился, введите заново'); return; } setLive(false); return; }
+  DATA=d; lastVer=DATA.generated?String(DATA.generated):v; setLive(true); draw();
+}
+$('#gateok').onclick=()=>{ const v=$('#gatepw').value; if(!v) return; PW=v; localStorage.setItem('dashpw',PW); $('#gatepw').value=''; boot(); };
+$('#gatepw').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#gateok').click(); } });
+boot(); setInterval(refresh,30000); setInterval(checkApp,30000); checkApp();
+</script>
+</body>
+</html>
